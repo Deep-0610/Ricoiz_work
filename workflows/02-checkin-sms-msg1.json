@@ -1,0 +1,276 @@
+{
+  "name": "WF-REV-01 \u2014 Check-in SMS (Msg 1)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Every 20 Min 8AM-8PM ET",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/20 8-20 * * *"
+            }
+          ]
+        }
+      },
+      "notes": "Cron: every 20 min, 8AM-8PM ET"
+    },
+    {
+      "id": "2",
+      "name": "GET Pending Check-ins",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/pending-checkin?limit=100",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Returns customers 2hr past jobCompletedAt, not sent yet, not opted out",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "3",
+      "name": "Split to Items",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "fieldToSplitOut": "customers",
+        "options": {}
+      }
+    },
+    {
+      "id": "4",
+      "name": "Recipient Quiet Hours Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Filter items where recipient local time is 8AM-9PM\n// Use client.timezone as default, NPA area code override if available\nconst items = $input.all();\nconst NPA_TZ = { '212': 'America/New_York', '415': 'America/Los_Angeles', /* ... full NPA table */ };\n\nreturn items.filter(item => {\n  const c = item.json;\n  const areaCode = (c.phone || '').replace(/^\\+1/, '').substring(0, 3);\n  const tz = NPA_TZ[areaCode] || c.timezone || 'America/New_York';\n  const localHour = new Date().toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: tz });\n  const hour = parseInt(localHour, 10);\n  return hour >= 8 && hour < 21;\n});"
+      }
+    },
+    {
+      "id": "5",
+      "name": "Loop Batches (10)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      }
+    },
+    {
+      "id": "6",
+      "name": "Build SMS Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// FIXED 2026-07-11: iterate all items + CTIA disclosure on first-touch program SMS.\nconst items = $input.all();\nreturn items.map(item => {\n  const c = item.json;\n  const text = `Hi ${c.firstName}, ${c.clientOwnerFirstName} from ${c.clientBusinessName} here \u2014 quick check, does everything look good with today's work? Reply STOP to opt out; msg&data rates apply.`;\n  return { json: { ...c, text, lead_id: c.closeLeadId, contact_id: c.closeContactId, local_phone: c.clientSenderPhone, remote_phone: c.phone } };\n});"
+      }
+    },
+    {
+      "id": "7",
+      "name": "Close SMS Send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1560,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.lead_id, contact_id: $json.contact_id, direction: 'outbound', status: 'outbox', local_phone: $json.local_phone, remote_phone: $json.remote_phone, text: $json.text }) }}",
+        "options": {
+          "retry": {
+            "maxTries": 1
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "8",
+      "name": "Mark Sent in Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1780,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/mark-sent",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ customerId: $('Build SMS Body').item.json.id, stage: 1, closeActivityId: $json.id }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "9",
+      "name": "Wait 1.5s (rate-limit)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2000,
+        300
+      ],
+      "parameters": {
+        "amount": 1.5,
+        "unit": "seconds"
+      }
+    }
+  ],
+  "connections": {
+    "Every 20 Min 8AM-8PM ET": {
+      "main": [
+        [
+          {
+            "node": "GET Pending Check-ins",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Pending Check-ins": {
+      "main": [
+        [
+          {
+            "node": "Split to Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split to Items": {
+      "main": [
+        [
+          {
+            "node": "Recipient Quiet Hours Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recipient Quiet Hours Check": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (10)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Batches (10)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Build SMS Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build SMS Body": {
+      "main": [
+        [
+          {
+            "node": "Close SMS Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close SMS Send": {
+      "main": [
+        [
+          {
+            "node": "Mark Sent in Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Sent in Convex": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 1.5s (rate-limit)": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (10)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

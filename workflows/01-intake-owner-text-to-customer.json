@@ -1,0 +1,557 @@
+{
+  "name": "WF-REV-INTAKE \u2014 Owner Text \u2192 Customer",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook (Close Inbound)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf-rev-intake",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "notes": "Trigger: Close CRM inbound SMS webhook to client's dedicated intake number",
+      "webhookId": "66fb38ae-79ec-4fdc-90bc-e5caab4670d0",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2",
+      "name": "Parse Owner Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Parse 'FirstName +1XXXXXXXXXX' or 'FirstName XXX-XXX-XXXX'\nconst text = $input.first().json.body?.event?.data?.text || '';\nconst intakePhone = $input.first().json.body?.event?.data?.local_phone || '';\nconst ownerPhone = $input.first().json.body?.event?.data?.remote_phone || '';\nconst match = text.match(/^([A-Za-z]+(?:\\s+[A-Za-z]+)?)\\s+(\\+?1?\\s*\\(?\\d{3}\\)?[\\s-]?\\d{3}[\\s-]?\\d{4})$/);\nif (!match) { return [{ json: { parseError: true, text, ownerPhone, intakePhone } }]; }\nconst firstName = match[1].trim();\nconst rawPhone = match[2].replace(/[^0-9]/g, '');\nconst phone = rawPhone.length === 10 ? `+1${rawPhone}` : `+${rawPhone}`;\nreturn [{ json: { parseError: false, firstName, phone, ownerPhone, intakePhone } }];"
+      }
+    },
+    {
+      "id": "3",
+      "name": "Lookup Client by Intake Phone",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "url": "=https://YOUR_CONVEX_DEPLOYMENT/reviews/client-by-intake-phone?intakePhone={{ encodeURIComponent($json.intakePhone) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Get clientId from intake phone number",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    },
+    {
+      "id": "4",
+      "name": "POST Customer Add",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/customer-add-via-text",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ clientId: $('Lookup Client by Intake Phone').item.json.clientId, firstName: $('Parse Owner Text').item.json.firstName, phone: $('Parse Owner Text').item.json.phone, intakedFromOwnerPhone: $('Parse Owner Text').item.json.ownerPhone }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Create customer, kick off drip",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    },
+    {
+      "id": "ad5d35d0-4122-45b8-9cdf-be5b5a94e66c",
+      "name": "Parse Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        660,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.parseError }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1783697634651-ltjeh9fes"
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "d33f0ad0-c5f2-497f-8cb9-fa8ea758c930",
+      "name": "SMS Owner: Parse Error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        880,
+        580
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $json.intakePhone, remote_phone: $json.ownerPhone, text: 'Couldn\\'t read that. Format: FirstName +1234567890 (or) FirstName 415-555-1234. Try again.' }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    },
+    {
+      "id": "760268a0-2712-4ed9-94ab-03e1b359196d",
+      "name": "Check Global Opt-Out",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://YOUR_CONVEX_DEPLOYMENT/reviews/opt-out-check?phone={{ encodeURIComponent($node['Parse Owner Text'].json.phone) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    },
+    {
+      "id": "a4ea3b17-3a02-4018-a22c-d009bb7735e5",
+      "name": "Is Opted Out?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.optedOut }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1783701081725-bln2hufww"
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "cb81e966-1796-453e-9156-5991fd0cafe4",
+      "name": "SMS Owner: Opt-Out Warning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1540,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: 'Heads up: ' + $node['Parse Owner Text'].json.firstName + ' has opted out of review texts. Not adding to drip.' }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    },
+    {
+      "id": "c5617a0e-7225-40d7-b68e-7ec9dacb49e9",
+      "name": "SMS Owner: Confirm Added",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1980,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: 'Got it \u2014 ' + $node['Parse Owner Text'].json.firstName + ' added. Check-in text goes out in 2 hours.' }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    },
+    {
+      "id": "04df5a42-00b6-450a-b385-784a1ad730f5",
+      "name": "Lookup Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        800,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ Boolean($json.clientId) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-lookup-found"
+            }
+          ]
+        }
+      },
+      "notes": "H4: gate downstream on client lookup success."
+    },
+    {
+      "id": "77fffc48-63f3-4830-a02a-2ccba5650521",
+      "name": "SMS Owner: Not Registered",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1020,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: \"This number isn't registered for Review Engine \u2014 contact support.\" }) }}",
+        "options": {}
+      },
+      "notes": "H4: sent when intake phone lookup returns no client.",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    },
+    {
+      "id": "e8783c03-0379-407e-a275-6269944dc4de",
+      "name": "Customer Add OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-customer-ok"
+            }
+          ]
+        }
+      },
+      "notes": "H5: branch on POST Customer Add response \u2014 success / duplicate / opted-out."
+    },
+    {
+      "id": "78b8b652-bc00-4cb6-b023-2df1c2cbab52",
+      "name": "Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1340,
+        460
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ ($json.reason || '') === 'duplicate' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-duplicate"
+            }
+          ]
+        }
+      },
+      "notes": "H5: dupe branch vs opt-out branch."
+    },
+    {
+      "id": "261ec2da-3459-4870-b963-607ca5cd3320",
+      "name": "SMS Owner: Duplicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1560,
+        380
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: $node['Parse Owner Text'].json.firstName + ' already in your list.' }) }}",
+        "options": {}
+      },
+      "notes": "H5: honest response when customer already exists.",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    },
+    {
+      "id": "831e5ac2-0d61-47c3-9dae-6c62ddab7570",
+      "name": "SMS Owner: Opt-Out (Add)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1560,
+        540
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: $node['Parse Owner Text'].json.firstName + ' has opted out \u2014 not added.' }) }}",
+        "options": {}
+      },
+      "notes": "H5: honest response when target is on the global opt-out list.",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true
+    }
+  ],
+  "connections": {
+    "Webhook (Close Inbound)": {
+      "main": [
+        [
+          {
+            "node": "Parse Owner Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Owner Text": {
+      "main": [
+        [
+          {
+            "node": "Parse Error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Error?": {
+      "main": [
+        [
+          {
+            "node": "SMS Owner: Parse Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup Client by Intake Phone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Global Opt-Out": {
+      "main": [
+        [
+          {
+            "node": "Is Opted Out?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Opted Out?": {
+      "main": [
+        [
+          {
+            "node": "SMS Owner: Opt-Out Warning",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "POST Customer Add",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Client by Intake Phone": {
+      "main": [
+        [
+          {
+            "node": "Lookup Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Found?": {
+      "main": [
+        [
+          {
+            "node": "Check Global Opt-Out",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SMS Owner: Not Registered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST Customer Add": {
+      "main": [
+        [
+          {
+            "node": "Customer Add OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Customer Add OK?": {
+      "main": [
+        [
+          {
+            "node": "SMS Owner: Confirm Added",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "SMS Owner: Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SMS Owner: Opt-Out (Add)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

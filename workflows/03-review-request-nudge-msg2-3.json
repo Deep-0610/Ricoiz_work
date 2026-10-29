@@ -1,0 +1,280 @@
+{
+  "name": "WF-REV-02 \u2014 Review Request + Nudge (Msg 2+3)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Hourly 9AM-8PM ET",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9-20 * * *"
+            }
+          ]
+        }
+      },
+      "notes": "Cron: hourly 9AM-8PM ET"
+    },
+    {
+      "id": "2",
+      "name": "GET SMS Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sms-batch?limit=100",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Returns customers due for Msg 2 (2hr post checkin) or Msg 3 (72hr post request, no click)",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "3",
+      "name": "Gate + Build SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// FIXED 2026-07-11: iterate + service-recovery gate + quiet hours + CTIA STOP disclosure.\nconst QUIET_START = 8, QUIET_END = 21;\n\nconst TEMPLATES = {\n  2: 'Hi {firstName}, {ownerFirstName} here from {businessName}. Thanks again for the opportunity to work with you. If you have 30 seconds, would you share your experience in a quick Google review? {reviewLink} Reply STOP to opt out.',\n  3: 'Quick follow-up \u2014 if you haven\u2019t had a chance yet, a quick Google review helps others know they can trust us. {reviewLink} Reply STOP to opt out.'\n};\n\nconst items = ($input.first().json.customers || []);\nconst out = [];\n\nfor (const c of items) {\n  // Service recovery gate\n  if (c.checkinNegative) continue;\n  \n  // Quiet hours check (recipient local)\n  const tz = c.timezone || 'America/New_York';\n  const localHour = parseInt(new Date().toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: tz }), 10);\n  if (localHour < QUIET_START || localHour >= QUIET_END) continue;\n  \n  const t = c.nextTouch;\n  let text = TEMPLATES[t]\n    .replace(/\\{firstName\\}/g, c.firstName || '')\n    .replace(/\\{ownerFirstName\\}/g, c.clientOwnerFirstName || '')\n    .replace(/\\{businessName\\}/g, c.clientBusinessName || '')\n    .replace(/\\{reviewLink\\}/g, c.reviewLink || '');\n  \n  out.push({ json: { ...c, text, lead_id: c.closeLeadId, contact_id: c.closeContactId, local_phone: c.clientSenderPhone, remote_phone: c.phone } });\n}\n\nreturn out;"
+      }
+    },
+    {
+      "id": "4",
+      "name": "Loop Batches (10)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "Close SMS Send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.lead_id, contact_id: $json.contact_id, direction: 'outbound', status: 'outbox', local_phone: $json.local_phone, remote_phone: $json.remote_phone, text: $json.text }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "6",
+      "name": "Mark Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/mark-sent",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ customerId: $('Gate + Build SMS').item.json.id, stage: $('Gate + Build SMS').item.json.nextTouch, closeActivityId: $json.id }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "7",
+      "name": "Wait 1.5s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        300
+      ],
+      "parameters": {
+        "amount": 1.5,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "2f54953e-6aee-46af-a15f-f2426e0f7b0c",
+      "name": "Get Close SMS History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1080,
+        200
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.close.com/api/v1/activity/sms/?lead_id={{ $json.lead_id }}&_limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "notes": "Fetch last 20 SMS on this lead \u2014 determine sticky sender + check for inbound reply",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "afdd8971-edf4-4403-abc9-5a2721ad5f13",
+      "name": "Sticky + Reply Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        380
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// FIXED: iterate over all items so 10-item batches process fully (was: only first)\n// n8n pairs each Get Close SMS History response with its matching Loop Batches item.\nconst items = $input.all();\nconst customers = $('Loop Batches (10)').all();\nconst out = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const customer = customers[i]?.json;\n  if (!customer) continue;\n  const history = (items[i].json.data || []).sort((a, b) => new Date(a.date_created) - new Date(b.date_created));\n\n  // Sticky sender: last outbound's local_phone, fallback to customer.local_phone\n  const lastOut = [...history].reverse().find(a => a.direction === 'outbound');\n  const stickyLocal = lastOut ? lastOut.local_phone : customer.local_phone;\n\n  // Reply gate: skip if inbound reply after last outbound\n  if (lastOut) {\n    const lastOutTime = new Date(lastOut.date_created).getTime();\n    const hasReply = history.some(a => a.direction === 'inbound' && new Date(a.date_created).getTime() > lastOutTime);\n    if (hasReply) continue;\n  }\n\n  out.push({ json: { ...customer, local_phone: stickyLocal } });\n}\n\nreturn out;"
+      },
+      "notes": "Set sticky sender + skip if inbound reply exists"
+    }
+  ],
+  "connections": {
+    "Hourly 9AM-8PM ET": {
+      "main": [
+        [
+          {
+            "node": "GET SMS Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET SMS Batch": {
+      "main": [
+        [
+          {
+            "node": "Gate + Build SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate + Build SMS": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (10)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close SMS Send": {
+      "main": [
+        [
+          {
+            "node": "Mark Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Sent": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 1.5s": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (10)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Batches (10)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Get Close SMS History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Close SMS History": {
+      "main": [
+        [
+          {
+            "node": "Sticky + Reply Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sticky + Reply Gate": {
+      "main": [
+        [
+          {
+            "node": "Close SMS Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

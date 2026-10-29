@@ -1,0 +1,842 @@
+{
+  "name": "WF-REV-SL-02 Followup SMS Touch 2-4",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9-20 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trg-cron",
+      "name": "Hourly 9AM-8PM ET",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        1456,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-followup-batch?limit=100",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "http-get-batch",
+      "name": "GET Convex /followup-batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1680,
+        -112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// v5 Touch 2/3/4 templates in v2.1 voice.\n// Deterministic variant assignment: hash(convex_id) mod N so a lead always maps to the same variant on retry.\nvar SINGULAR = {'roofing':'roofing company','roofer':'roofing company','plumbing':'plumbing company','plumber':'plumbing company','hvac':'HVAC company','electrical':'electrician','electrician':'electrician','concrete':'concrete company','tree service':'tree service','septic':'septic company','landscaping':'landscaping company','garage door':'garage door company','foundation':'foundation company','painting':'painting company','pressure washing':'pressure washing company','remodeling':'remodeler','deck builder':'deck builder','junk removal':'junk removal company','general contractor':'general contractor','gc':'general contractor','dentist':'dentist','chiropractor':'chiropractor','med spa':'med spa','auto repair':'auto shop','pest control':'pest control company','windows':'windows company','masonry':'masonry company','restoration':'restoration company','flooring':'flooring company','metal fabrication':'metal fab company'};\nfunction niche2sing(n) { return SINGULAR[String(n||'').toLowerCase().trim()] || (n + ' company'); }\nfunction hash(str) { var h = 0; for (var i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0; return Math.abs(h); }\nvar GREETINGS = ['Hey', 'Hey there', ''];\n\nvar SEND_REAL = true;\nvar items = $input.all();\nvar out = [];\nvar allLeads = [];\nfor (var it of items) {\n  if (it.json && Array.isArray(it.json.leads)) allLeads = allLeads.concat(it.json.leads);\n  else allLeads.push(it.json);\n}\n\nfor (var lead of allLeads) {\n  var nicheSingular = niche2sing(lead.niche);\n  var city = lead.city || 'your area';\n  var name = lead.businessName || 'your shop';\n  var convexId = lead.id || '';\n  var greeting = GREETINGS[hash(convexId + '_g') % 3];\n  var greetPrefix = greeting ? greeting + ' ' : '';\n  var text = '';\n  var variant = '';\n  var touch = lead.nextTouch;\n\n  if (touch === 2) {\n    text = greetPrefix + \"went ahead and wrote it up anyway... here's what I found on \" + name + \": YOUR_APP_HOST/audit?l=\" + convexId + \"\\n\\nIt takes about 60 seconds. No pitch on there, just your numbers vs the businesses above you.\";\n  } else if (touch === 3) {\n    text = \"Hey, did you ever get a look at those notes for \" + name + \"? Here it is again in case it got buried: YOUR_APP_HOST/audit?l=\" + convexId + \"\\n\\nHappy to walk you through the fix on a quick call. I'm only taking one more \" + nicheSingular + \" in \" + city + \" this month and wanted to give you first shot.\";\n  } else if (touch === 4) {\n    var VARIANTS = ['V1', 'V2', 'V3', 'V4'];\n    variant = VARIANTS[hash(convexId + '_t4') % 4];\n    if (variant === 'V1') {\n      text = \"Alright, taking \" + name + \" off my list... going with another \" + nicheSingular + \" in \" + city + \" instead. If anything changes just text me. Cya later alligator \ud83d\udc0a\";\n    } else if (variant === 'V2') {\n      text = \"No worries, sounds like the timing's off. Gave the \" + city + \" spot to another \" + nicheSingular + \" this morning. Door's open if anything changes. Cya later alligator \ud83d\udc0a\";\n    } else if (variant === 'V3') {\n      text = \"Alright, moving on to the next \" + nicheSingular + \" in \" + city + \". If anything changes you know where to find me. Cya later alligator \ud83d\udc0a\";\n    } else {\n      text = \"Last one from me... before I give the \" + city + \" spot to another \" + nicheSingular + \", any interest at all? One word is fine either way. Cya later alligator \ud83d\udc0a\";\n    }\n  } else { continue; }\n\n  out.push({ json: Object.assign({}, lead, { text: text, touch_number: touch, variant: variant, send_real: SEND_REAL }) });\n}\nreturn out;"
+      },
+      "id": "gate-build",
+      "name": "Gate + Build SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1888,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.send_real }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-send-real",
+      "name": "SEND_REAL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        768,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "console.log('DRY-RUN: would have sent ' + $input.all().length + ' followup SMS');\nreturn $input.all().map(i => ({ json: { dryrun: true } }));"
+      },
+      "id": "noop",
+      "name": "No-Op (dry-run log)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "loop",
+      "name": "Loop Batches (10)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        960,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let sent = 0, skipped = 0, failed = 0;\ntry { sent = $('Convex /record-sms').all().length; } catch(e) {}\ntry { skipped = $('Slack: Followup Skipped (Status)').all().length; } catch(e) {}\ntry { failed = $('Slack: Followup Failed').all().length; } catch(e) {}\nconst webhook = 'YOUR_SLACK_WEBHOOK';\nawait this.helpers.httpRequest({ method: 'POST', url: webhook, body: { text: 'WF-REV-SL-02 Hourly Wave: sent ' + sent + ' followups, skipped ' + skipped + ', failed ' + failed }, json: true });\nreturn [{ json: { sent, skipped, failed } }];"
+      },
+      "id": "slack-summary",
+      "name": "Slack: send summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.close.com/api/v1/lead/{{ $json.closeLeadId }}/?_fields=id,status_label",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "http-close-status",
+      "name": "Close GET lead status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1152,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ ['HUMAN HAND','Replied','Opted Out','Booked','Closed Won','Closed Lost'].includes($json.status_label) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-status-skip",
+      "name": "Status in skip list?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1344,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'SL-02 SKIPPED (status): ' + ($('Gate + Build SMS').item.json.businessName || '?') + ' status=' + ($json.status_label || '?') }) }}",
+        "options": {}
+      },
+      "id": "slack-status-skip",
+      "name": "Slack: Followup Skipped (Status)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1536,
+        80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.close.com/api/v1/activity/sms/?lead_id={{ $('Gate + Build SMS').item.json.closeLeadId }}&_order_by=-date_created&_limit=10&_fields=id,direction,date_created",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "http-close-inbound",
+      "name": "Close GET inbound check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1536,
+        336
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ (($json.data || []).filter(m => m.direction === 'inbound').length > 0) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1784053636381-1ktaar1cd"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-has-inbound",
+      "name": "Has inbound?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1728,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.close.com/api/v1/activity/sms/?lead_id={{ $('Gate + Build SMS').item.json.closeLeadId }}&_order_by=-date_created&_limit=1&_fields=id,local_phone,direction,date_created",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "id": "http-close-sms-hist",
+      "name": "Close GET SMS history (sticky)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1920,
+        464
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "var hist = $input.first().json;\nvar leadCtx = $('Gate + Build SMS').item.json;\nvar lastOut = (hist.data && hist.data[0]) ? hist.data[0] : null;\nvar stickyLocal = lastOut ? lastOut.local_phone : leadCtx.assignedSenderPhone;\nreturn [{ json: Object.assign({}, leadCtx, { sender_phone: stickyLocal }) }];"
+      },
+      "id": "code-sticky",
+      "name": "Derive Sticky Sender",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.closeLeadId, direction: 'outbound', status: 'outbox', local_phone: $json.sender_phone, remote_phone: $json.phone, text: $json.text }) }}",
+        "options": {}
+      },
+      "id": "http-close-sms",
+      "name": "Close SMS Followup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2304,
+        464
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-sent",
+      "name": "Followup Sent OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2496,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'SL-02 FAILED: ' + ($('Derive Sticky Sender').item.json.businessName || '?') + ' T' + ($('Derive Sticky Sender').item.json.touch_number || '?') }) }}",
+        "options": {}
+      },
+      "id": "slack-fail",
+      "name": "Slack: Followup Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2496,
+        656
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-log-activity",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('Derive Sticky Sender').item.json.id, direction: 'outbound', touchNumber: $('Derive Sticky Sender').item.json.touch_number, senderPhone: $('Derive Sticky Sender').item.json.sender_phone, recipientPhone: $('Derive Sticky Sender').item.json.phone, text: $('Derive Sticky Sender').item.json.text, closeActivityId: $json.id }) }}",
+        "options": {}
+      },
+      "id": "cvx-log",
+      "name": "Convex /sms-activities/log (followup)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2688,
+        336
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-record-sms",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('Derive Sticky Sender').item.json.id, touchNumber: $('Derive Sticky Sender').item.json.touch_number, closeActivityId: $('Followup Sent OK?').item.json.id, text: $('Derive Sticky Sender').item.json.text, senderPhone: $('Derive Sticky Sender').item.json.sender_phone, variant: $('Derive Sticky Sender').item.json.variant }) }}",
+        "options": {}
+      },
+      "id": "cvx-record",
+      "name": "Convex /record-sms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2880,
+        336
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.close.com/api/v1/lead/{{ $('Derive Sticky Sender').item.json.closeLeadId }}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ 'custom.cf_PcdRHPUTgoPxgqczBOFs5eDrhVFAqYcez63lQgCJyJK': $('Derive Sticky Sender').item.json.touch_number }) }}",
+        "options": {}
+      },
+      "id": "http-cf-count",
+      "name": "Close PUT cf SMS Count",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3072,
+        336
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 1.5
+      },
+      "id": "wait",
+      "name": "Wait 1.5s (rate-limit)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3264,
+        336
+      ],
+      "webhookId": "2f80f64b-280b-4e3a-ab5f-61f8ac41c4fb"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.track === 'new' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1784039184206-rznte9xy7"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-track-new",
+      "name": "Track Is New?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2304,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.closeLeadId, direction: 'outbound', status: 'outbox', local_phone: $json.sender_phone, remote_phone: $json.phone, text: $json.text }) }}",
+        "options": {}
+      },
+      "id": "http-close-sms-new",
+      "name": "Close SMS Followup NEW",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2496,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "maxItems": 100
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        2096,
+        -112
+      ],
+      "id": "a84ffefc-6aad-41b6-84d7-43120954ff71",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-update-status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('Gate + Build SMS').item.json.id, newStatus: 'replied', lastReplyText: '__prior_inbound_detected__', lastReplyIntent: 'PRIOR_HISTORY' }) }}",
+        "options": {}
+      },
+      "id": "http-convex-mark-replied",
+      "name": "Convex mark-replied (prior inbound)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1712,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Hourly 9AM-8PM ET": {
+      "main": [
+        [
+          {
+            "node": "GET Convex /followup-batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Convex /followup-batch": {
+      "main": [
+        [
+          {
+            "node": "Gate + Build SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate + Build SMS": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEND_REAL?": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (10)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No-Op (dry-run log)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Batches (10)": {
+      "main": [
+        [
+          {
+            "node": "Slack: send summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close GET lead status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close GET lead status": {
+      "main": [
+        [
+          {
+            "node": "Status in skip list?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status in skip list?": {
+      "main": [
+        [
+          {
+            "node": "Slack: Followup Skipped (Status)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close GET inbound check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Followup Skipped (Status)": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close GET inbound check": {
+      "main": [
+        [
+          {
+            "node": "Has inbound?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has inbound?": {
+      "main": [
+        [
+          {
+            "node": "Convex mark-replied (prior inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close GET SMS history (sticky)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close GET SMS history (sticky)": {
+      "main": [
+        [
+          {
+            "node": "Derive Sticky Sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close SMS Followup": {
+      "main": [
+        [
+          {
+            "node": "Followup Sent OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Followup Sent OK?": {
+      "main": [
+        [
+          {
+            "node": "Convex /sms-activities/log (followup)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: Followup Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Followup Failed": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex /sms-activities/log (followup)": {
+      "main": [
+        [
+          {
+            "node": "Convex /record-sms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex /record-sms": {
+      "main": [
+        [
+          {
+            "node": "Close PUT cf SMS Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close PUT cf SMS Count": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 1.5s (rate-limit)": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (10)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Derive Sticky Sender": {
+      "main": [
+        [
+          {
+            "node": "Track Is New?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Is New?": {
+      "main": [
+        [
+          {
+            "node": "Close SMS Followup NEW",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close SMS Followup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close SMS Followup NEW": {
+      "main": [
+        [
+          {
+            "node": "Followup Sent OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "SEND_REAL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex mark-replied (prior inbound)": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "binaryMode": "separate"
+  },
+  "active": false
+}

@@ -1,0 +1,375 @@
+{
+  "name": "WF-REV-04 \u2014 AI Auto-Response (GBP + Claude)",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Every 15 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 * * * *"
+            }
+          ]
+        }
+      },
+      "notes": "Cron: every 15 min. Polls GBP for new reviews across all clients past 7-day cooldown"
+    },
+    {
+      "id": "2",
+      "name": "GET Clients With GBP Active",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/clients-with-gbp-active",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Only clients past 7-day GBP Manager cooldown",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "3",
+      "name": "Split Clients",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "fieldToSplitOut": "clients",
+        "options": {}
+      }
+    },
+    {
+      "id": "4",
+      "name": "Loop Clients (5)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "GBP API \u2014 List Reviews",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://mybusiness.googleapis.com/v4/accounts/{{ $json.gbpAccountId }}/locations/{{ $json.gbpLocationId }}/reviews?pageSize=20&orderBy=updateTime desc",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.gbpAccessToken }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "GBP API v4 \u2014 reviews list. Requires GBP Manager access + 7-day cooldown cleared.",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "6",
+      "name": "Filter New Reviews",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const reviews = ($input.first().json.reviews || []).filter(r => !r.reviewReply);\nconst clientData = $node['Loop Clients (5)'].json;\nreturn reviews.map(r => ({ json: { ...clientData, review: r, gbpReviewId: r.reviewId, reviewerName: r.reviewer?.displayName, rating: parseInt(String(r.starRating).replace(/[^0-9]/g, ''), 10), text: r.comment } }));"
+      }
+    },
+    {
+      "id": "7",
+      "name": "Claude Draft Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1560,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENROUTER_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'anthropic/claude-haiku-4-5-20251001', max_tokens: 200, temperature: 0.7, messages: [ { role: 'system', content: 'You are ' + $json.ownerFirstName + ', owner of ' + $json.businessName + '. Respond to this Google review authentically, warmly, briefly (2-4 sentences). 5-star: warm thanks. 4-star: thank + acknowledge feedback. 3-star or below: sincere apology + provide ' + $json.ownerPhone + ' for direct contact. Sign with \\'- ' + $json.ownerFirstName + '\\'. Sound human. Never mention AI.' }, { role: 'user', content: 'Review from ' + $json.reviewerName + ' (' + $json.rating + ' stars): \\'' + $json.text + '\\'' } ] }) }}",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "8",
+      "name": "POST Response Drafted",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1780,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/response-drafted",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ clientId: $node['Filter New Reviews'].json.id, gbpReviewId: $node['Filter New Reviews'].json.gbpReviewId, reviewerName: $node['Filter New Reviews'].json.reviewerName, reviewRating: $node['Filter New Reviews'].json.rating, reviewText: $node['Filter New Reviews'].json.text, aiDraft: $json.choices[0].message.content }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "9",
+      "name": "Route by Rating",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2000,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $node['Filter New Reviews'].json.rating }}",
+              "rightValue": 4,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              },
+              "id": "condition-1783697686137-0fvj9bei4"
+            }
+          ],
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Auto-Post 4-5 Star",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2220,
+        200
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://mybusiness.googleapis.com/v4/{{ $node['Filter New Reviews'].json.gbpReviewId }}/reply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node['Loop Clients (5)'].json.gbpAccessToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ comment: $node['Claude Draft Response'].json.choices[0].message.content }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "11",
+      "name": "Post to Slack Approval (1-3 Star)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2220,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK-ENGINE-APPROVALS/PLACEHOLDER",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '\u2757 New ' + $node['Filter New Reviews'].json.rating + '-star review for ' + $node['Loop Clients (5)'].json.businessName + '\\n\\nReviewer: ' + $node['Filter New Reviews'].json.reviewerName + '\\nReview: ' + $node['Filter New Reviews'].json.text + '\\n\\nAI Draft: ' + $node['Claude Draft Response'].json.choices[0].message.content + '\\n\\nApprove within 60 min or auto-posts.' }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    }
+  ],
+  "connections": {
+    "Every 15 Min": {
+      "main": [
+        [
+          {
+            "node": "GET Clients With GBP Active",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Clients With GBP Active": {
+      "main": [
+        [
+          {
+            "node": "Split Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Clients": {
+      "main": [
+        [
+          {
+            "node": "Loop Clients (5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Clients (5)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "GBP API \u2014 List Reviews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GBP API \u2014 List Reviews": {
+      "main": [
+        [
+          {
+            "node": "Filter New Reviews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter New Reviews": {
+      "main": [
+        [
+          {
+            "node": "Claude Draft Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Draft Response": {
+      "main": [
+        [
+          {
+            "node": "POST Response Drafted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST Response Drafted": {
+      "main": [
+        [
+          {
+            "node": "Route by Rating",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Rating": {
+      "main": [
+        [
+          {
+            "node": "Auto-Post 4-5 Star",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post to Slack Approval (1-3 Star)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

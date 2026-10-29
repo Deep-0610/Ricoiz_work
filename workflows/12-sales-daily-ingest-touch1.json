@@ -1,0 +1,980 @@
+{
+  "name": "WF-REV-SL-01 Daily Ingest + Touch 1 SMS",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 7,8,9,10 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trg-cron",
+      "name": "Daily 7:30/8:30/9:30/10:30 AM ET",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        800,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-daily-batch?limit=100&minReviews=10&maxReviews=100",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "http-get-batch",
+      "name": "GET Convex /daily-batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        816,
+        -160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "leads",
+        "options": {}
+      },
+      "id": "split",
+      "name": "Split to items",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        848,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "var SENDERS = [{label:'NEW1',phone:'+15555550100'},{label:'NEW2',phone:'+15555550100'},{label:'NEW3',phone:'+15555550100'},{label:'NEW4',phone:'+15555550100'},{label:'NEW5',phone:'+15555550100'}];\nvar MAX_PER_SENDER = 100;\nvar res = await this.helpers.httpRequest({ method:'GET', url:'https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-senders-today', headers:{Authorization:'Bearer YOUR_BEARER_TOKEN'}, json:true });\nvar perPhone = (res && res.perPhone) || {};\nvar items = $input.all();\nvar senderIdx = 0;\nvar usedInSlot = perPhone[SENDERS[0].phone] || 0;\nfor (var i = 0; i < items.length; i++) {\n  while (senderIdx < SENDERS.length && usedInSlot >= MAX_PER_SENDER) {\n    senderIdx++;\n    usedInSlot = senderIdx < SENDERS.length ? (perPhone[SENDERS[senderIdx].phone] || 0) : MAX_PER_SENDER;\n  }\n  if (senderIdx >= SENDERS.length) {\n    items[i].json.sender_label = null;\n    items[i].json.sender_phone = null;\n    items[i].json.sender_full = true;\n  } else {\n    items[i].json.sender_label = SENDERS[senderIdx].label;\n    items[i].json.sender_phone = SENDERS[senderIdx].phone;\n    items[i].json.sender_full = false;\n    usedInSlot++;\n  }\n}\nreturn items;"
+      },
+      "id": "assign-senders",
+      "name": "Assign Senders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "loop",
+      "name": "Loop Batches (10)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        752,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let total = 0, created = 0;\ntry { total = $('Assign Senders').all().length; } catch(e) {}\ntry { created = $('Close POST /lead/').all().filter(x => x.json && x.json.id).length; } catch(e) {}\nconst webhook = 'YOUR_SLACK_WEBHOOK';\nawait this.helpers.httpRequest({ method:'POST', url:webhook, body:{ text: 'WF-REV-SL-01 Daily Batch: pulled ' + total + ', created ' + created + ' Close leads' }, json:true });\nreturn [{ json: { total, created } }];"
+      },
+      "id": "slack-summary",
+      "name": "Slack: send summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.close.com/api/v1/lead/?query=phone:{{ $json.phone }}&_fields=id&_limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "http-dup-check",
+      "name": "Close Duplicate Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        944,
+        336
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ Number($json.total_results || 0) }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-not-dup",
+      "name": "Not Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1136,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-update-status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('Assign Senders').item.json.id, newStatus: 'dup_in_close' }) }}",
+        "options": {}
+      },
+      "id": "cvx-update-dup",
+      "name": "Convex /update-status (dup)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1136,
+        528
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'DUP SKIPPED (SALES): ' + ($('Assign Senders').item.json.businessName || '?') + ' phone ' + ($('Assign Senders').item.json.phone || '?') }) }}",
+        "options": {}
+      },
+      "id": "slack-dup",
+      "name": "Slack: Duplicate Skipped",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1328,
+        528
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "var NPA_TZ = {\"405\":\"America/Chicago\",\"410\":\"America/New_York\",\"901\":\"America/Chicago\",\"520\":\"America/Phoenix\",\"502\":\"America/New_York\",\"915\":\"America/Chicago\",\"989\":\"America/New_York\",\"313\":\"America/New_York\",\"480\":\"America/Phoenix\",\"720\":\"America/Denver\",\"702\":\"America/Los_Angeles\",\"303\":\"America/Denver\",\"404\":\"America/New_York\",\"678\":\"America/New_York\",\"414\":\"America/Chicago\",\"612\":\"America/Chicago\",\"443\":\"America/New_York\",\"763\":\"America/Chicago\",\"812\":\"America/Chicago\",\"256\":\"America/Chicago\",\"617\":\"America/New_York\",\"623\":\"America/Phoenix\",\"539\":\"America/Chicago\",\"505\":\"America/Los_Angeles\",\"330\":\"America/New_York\",\"903\":\"America/New_York\",\"918\":\"America/Chicago\",\"205\":\"America/Chicago\",\"615\":\"America/Chicago\",\"704\":\"America/Denver\",\"983\":\"America/New_York\",\"770\":\"America/New_York\",\"618\":\"America/Chicago\",\"857\":\"America/New_York\",\"806\":\"America/Chicago\",\"508\":\"America/New_York\",\"239\":\"America/New_York\",\"952\":\"America/Chicago\",\"229\":\"America/Chicago\",\"301\":\"America/New_York\",\"402\":\"America/New_York\",\"725\":\"America/Los_Angeles\",\"765\":\"America/Chicago\",\"223\":\"America/Chicago\",\"662\":\"America/New_York\",\"706\":\"America/New_York\",\"240\":\"America/New_York\",\"347\":\"America/New_York\",\"212\":\"America/New_York\",\"646\":\"America/New_York\",\"516\":\"America/New_York\",\"332\":\"America/New_York\",\"929\":\"America/New_York\",\"917\":\"America/New_York\",\"718\":\"America/New_York\",\"252\":\"America/New_York\",\"507\":\"America/Chicago\",\"512\":\"America/Chicago\",\"501\":\"America/Chicago\",\"737\":\"America/Chicago\",\"517\":\"America/New_York\",\"614\":\"America/New_York\",\"406\":\"America/New_York\",\"979\":\"America/New_York\",\"828\":\"America/New_York\",\"920\":\"America/New_York\",\"609\":\"America/New_York\",\"380\":\"America/New_York\",\"323\":\"America/Los_Angeles\",\"972\":\"America/Chicago\",\"214\":\"America/Chicago\",\"570\":\"America/New_York\",\"469\":\"America/Chicago\",\"503\":\"America/Los_Angeles\",\"817\":\"America/Chicago\",\"945\":\"America/Chicago\",\"682\":\"America/Chicago\",\"317\":\"America/New_York\",\"424\":\"America/Los_Angeles\",\"215\":\"America/New_York\",\"315\":\"America/New_York\",\"267\":\"America/New_York\",\"610\":\"America/New_York\",\"272\":\"America/New_York\",\"602\":\"America/Phoenix\",\"760\":\"America/Los_Angeles\",\"970\":\"America/Denver\",\"210\":\"America/Chicago\",\"726\":\"America/Chicago\",\"346\":\"America/Chicago\",\"858\":\"America/Los_Angeles\",\"281\":\"America/Chicago\",\"832\":\"America/Chicago\",\"713\":\"America/Chicago\",\"254\":\"America/Chicago\"};\nvar START_MIN = 8 * 60;\nvar END_MIN = 20 * 60;\nfunction npaTz(p){ var d=String(p||'').replace(/\\D/g,'').slice(-10); return NPA_TZ[d.slice(0,3)] || 'America/New_York'; }\nvar out = [];\nfor (var item of $input.all()) {\n  // Voltaris pattern: use paired .item to get correct lead per iteration\n  var lead = $('Assign Senders').item.json;\n  var tz = npaTz(lead.phone);\n  var h = 12, m = 0;\n  try {\n    var parts = new Intl.DateTimeFormat('en-US', {hour:'numeric', minute:'numeric', hour12:false, timeZone:tz}).formatToParts(new Date());\n    for (var i = 0; i < parts.length; i++) {\n      if (parts[i].type === 'hour') h = Number(parts[i].value);\n      if (parts[i].type === 'minute') m = Number(parts[i].value);\n    }\n  } catch(e) {}\n  var total_min = h * 60 + m;\n  var within_window = total_min >= START_MIN && total_min < END_MIN;\n  var merged = {\n    convex_id: lead.id,\n    businessName: lead.businessName,\n    phone: lead.phone,\n    city: lead.city,\n    state: lead.state,\n    niche: lead.niche,\n    nicheSingular: lead.nicheSingular,\n    googleReviewCount: lead.googleReviewCount,\n    googleRating: lead.googleRating,\n    googleReviewUrl: lead.googleReviewUrl,\n    ownerFirstName: lead.ownerFirstName,\n    email: lead.email,\n    sender_phone: lead.sender_phone,\n    sender_label: lead.sender_label,\n    dup_check: item.json,\n    within_window: within_window,\n    local_hour: h,\n    local_minute: m,\n    tz_used: tz\n  };\n  out.push({ json: merged, pairedItem: item.pairedItem });\n}\nreturn out;"
+      },
+      "id": "tcpa-check",
+      "name": "TCPA Time Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.within_window }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-tcpa",
+      "name": "Within TCPA Window?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1520,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'TCPA SKIPPED (SALES): ' + ($('TCPA Time Check').item.json.businessName || '?') + ' local ' + ($json.local_hour || '?') + ' ' + ($json.tz_used || '?') }) }}",
+        "options": {}
+      },
+      "id": "slack-tcpa",
+      "name": "Slack: TCPA Skipped",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1712,
+        528
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/lead/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (function(){ var l = $json; var TZ = {OH:'ET',MI:'ET',NC:'ET',SC:'ET',GA:'ET',FL:'ET',VA:'ET',WV:'ET',PA:'ET',NY:'ET',NJ:'ET',CT:'ET',MA:'ET',RI:'ET',VT:'ET',NH:'ET',ME:'ET',MD:'ET',DE:'ET',DC:'ET',KY:'ET',IN:'ET',AL:'CT',LA:'CT',MS:'CT',TN:'CT',AR:'CT',MO:'CT',IA:'CT',MN:'CT',WI:'CT',IL:'CT',OK:'CT',TX:'CT',KS:'CT',NE:'CT',SD:'CT',ND:'CT',MT:'MT',WY:'MT',CO:'MT',NM:'MT',UT:'MT',AZ:'MT',ID:'MT',CA:'PT',OR:'PT',WA:'PT',NV:'PT'}; var st = String(l.state||'').toUpperCase().trim(); var tz = TZ[st] || undefined; var body = { name: l.businessName, url: l.googleReviewUrl || undefined, contacts: [{ name: l.ownerFirstName || l.businessName, emails: l.email ? [{ email: l.email, type: 'office' }] : [], phones: [{ phone: l.phone, type: 'mobile' }] }], 'custom.cf_u4Hy4gZaeEGKM6hmtoXCvKHqxT5kLAMga9XE6HKa5cG': l.niche, 'custom.cf_qi2n7BVM6AwYTv9AR4wyNBZDOP2SneLucX5NKNN150o': l.city, 'custom.cf_saFSzrigpdmJraiY8Tj6PC2HYnieWXrxvlZ8ycUd3gp': l.state, 'custom.cf_amnmRrlaPBheatw5a11gKcTHsOEYsXn9y4Q4eRAEfrf': l.googleRating, 'custom.cf_nyGJLfXTqtB4kTY4Vg1BEe67HRjvpqLXB0DIxGDOlKZ': l.googleReviewCount, 'custom.cf_wOj9YA0SuwimkXa5dDv3UoJJWWeMHBxX5Pqw9qrK9Gb': l.googleReviewUrl, 'custom.cf_j6QkeiU0nlzk0kgngkIENCSHEu7LxJ3NsBN0TgvkzKT': l.sender_phone, 'custom.cf_PcdRHPUTgoPxgqczBOFs5eDrhVFAqYcez63lQgCJyJK': 0, 'custom.cf_QaXxtdAmTEByJ8SOBFk4wizgJwrwZF7XtSufDkTCP2x': l.convex_id, 'custom.cf_bWgM0fxF58n1BO5YElBmJcuTV1CzDw5sIGY3wa3b51u': 'reviewsales' }; if (tz) body['custom.cf_BkcfnGTkMu0BnsxogmbuVQ746I4m4vqaTdZkQG5LYsV'] = tz; return JSON.stringify(body); })() }}",
+        "options": {}
+      },
+      "id": "http-close-create",
+      "name": "Close POST /lead/",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1712,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-create-ok",
+      "name": "Close Create OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1904,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-mark-pushed",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('TCPA Time Check').item.json.convex_id, closeLeadId: $json.id, closeContactId: ($json.contacts && $json.contacts[0]) ? $json.contacts[0].id : undefined, track: 'new' }) }}",
+        "options": {}
+      },
+      "id": "cvx-mark-pushed",
+      "name": "Convex /mark-pushed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2096,
+        144
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $('v5: Compute Text 1').item.json.close_lead_id, contact_id: $('v5: Compute Text 1').item.json.close_contact_id, direction: 'outbound', status: 'outbox', local_phone: $('v5: Compute Text 1').item.json.sender_phone, remote_phone: $('v5: Compute Text 1').item.json.phone, text: $('v5: Compute Text 1').item.json.text_1 }) }}",
+        "options": {}
+      },
+      "id": "http-close-sms",
+      "name": "Close SMS - Opener (Text 1)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2288,
+        144
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "if-sms-sent",
+      "name": "SMS Sent OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2480,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'SALES OPENER FAILED: ' + ($('TCPA Time Check').item.json.businessName || '?') + ' phone ' + ($('TCPA Time Check').item.json.phone || '?') }) }}",
+        "options": {}
+      },
+      "id": "slack-sms-fail",
+      "name": "Slack: SMS Failed (opener)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2480,
+        400
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-log-activity",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('v5: Compute Text 1').item.json.convex_id, direction: 'outbound', touchNumber: 1, senderPhone: $('v5: Compute Text 1').item.json.sender_phone, recipientPhone: $('v5: Compute Text 1').item.json.phone, text: $('v5: Compute Text 1').item.json.text_1, closeActivityId: $('Close SMS - Opener (Text 1)').item.json.id }) }}",
+        "options": {}
+      },
+      "id": "cvx-log-activity",
+      "name": "Convex /sms-activities/log (opener)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2672,
+        48
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-record-sms",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('v5: Compute Text 1').item.json.convex_id, touchNumber: 1, closeActivityId: $('Close SMS - Opener (Text 1)').item.json.id, text: $('v5: Compute Text 1').item.json.text_1, senderPhone: $('v5: Compute Text 1').item.json.sender_phone, variant: $('v5: Compute Text 1').item.json.variant }) }}",
+        "options": {}
+      },
+      "id": "cvx-record-sms",
+      "name": "Convex /record-sms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2864,
+        48
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.close.com/api/v1/lead/{{ $('Close POST /lead/').item.json.id }}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ 'custom.cf_PcdRHPUTgoPxgqczBOFs5eDrhVFAqYcez63lQgCJyJK': 1 }) }}",
+        "options": {}
+      },
+      "id": "http-close-cf-count",
+      "name": "Close PUT cf SMS Count",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3056,
+        48
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 2.3
+      },
+      "id": "wait",
+      "name": "Wait 1.5s (rate-limit)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3248,
+        240
+      ],
+      "webhookId": "25217fad-7eab-43f1-9263-5a7baecb889a"
+    },
+    {
+      "parameters": {
+        "maxItems": 100
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        1056,
+        -32
+      ],
+      "id": "d824bcf2-a2dd-4555-b5fa-ddf09c02a044",
+      "name": "Limit"
+    },
+    {
+      "parameters": {
+        "jsCode": "// v5: Deterministic Touch 1 variant assignment + text generation.\nvar lead = $('TCPA Time Check').item.json;\nvar closeLead = $('Close POST /lead/').item.json;\nvar convexId = lead.convex_id || lead.id || '';\n\nfunction hash(str) {\n  var h = 0;\n  for (var i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;\n  return Math.abs(h);\n}\n\nvar VARIANTS = ['V1', 'V2', 'V3'];\nvar variant = VARIANTS[hash(convexId) % 3];\n\nvar GREETINGS = ['Hey', 'Hey there', ''];\nvar greeting = GREETINGS[hash(convexId + '_g') % 3];\n\nvar now = new Date();\nvar hour = now.getHours();\nvar dayRef = hour < 12 ? 'this morning' : (hour < 17 ? 'this afternoon' : 'earlier today');\n\nvar SINGULAR = {'roofing':'roofing company','roofer':'roofing company','plumbing':'plumbing company','plumber':'plumbing company','hvac':'HVAC company','electrical':'electrician','electrician':'electrician','concrete':'concrete company','tree service':'tree service','septic':'septic company','landscaping':'landscaping company','garage door':'garage door company','foundation':'foundation company','painting':'painting company','pressure washing':'pressure washing company','remodeling':'remodeler','deck builder':'deck builder','junk removal':'junk removal company','general contractor':'general contractor','gc':'general contractor','dentist':'dentist','chiropractor':'chiropractor','med spa':'med spa','auto repair':'auto shop','pest control':'pest control company','windows':'windows company','masonry':'masonry company','restoration':'restoration company','flooring':'flooring company','metal fabrication':'metal fab company'};\nvar PLURAL = {'roofing':'roofers','roofer':'roofers','plumbing':'plumbers','plumber':'plumbers','hvac':'HVAC companies','electrical':'electricians','electrician':'electricians','concrete':'concrete companies','tree service':'tree services','septic':'septic companies','landscaping':'landscapers','garage door':'garage door companies','foundation':'foundation companies','painting':'painters','pressure washing':'pressure washers','remodeling':'remodelers','deck builder':'deck builders','junk removal':'junk removal companies','general contractor':'general contractors','gc':'general contractors','dentist':'dentists','chiropractor':'chiropractors','med spa':'med spas','auto repair':'auto shops','pest control':'pest control companies','windows':'window companies','masonry':'masonry companies','restoration':'restoration companies','flooring':'flooring companies','metal fabrication':'metal fab shops'};\nfunction n2s(n){ return SINGULAR[String(n||'').toLowerCase().trim()] || (n + ' company'); }\nfunction n2p(n){ return PLURAL[String(n||'').toLowerCase().trim()] || (n + 's'); }\n\nvar city = lead.city || 'your area';\nvar name = lead.businessName || 'your shop';\nvar nicheSingular = n2s(lead.niche);\nvar nichePlural = n2p(lead.niche);\nvar reviewCount = lead.googleReviewCount || 0;\n\nvar text_1 = '';\nvar text_2_v2 = '';\nvar is_v2 = false;\n\nif (variant === 'V1') {\n  text_1 = 'I was looking up ' + nichePlural + ' in ' + city + ' ' + dayRef + ' and ' + name + ' came up... checked the reviews first like everyone does. Noticed the businesses above you on Google are doing one specific thing that\\'s winning them the calls. Want me to send what I found?';\n} else if (variant === 'V2') {\n  text_1 = 'Hey, is this the owner of ' + name + '?';\n  text_2_v2 = 'I was comparing ' + nichePlural + ' in ' + city + ' ' + dayRef + ' and noticed something with your Google reviews that\\'s probably costing you jobs. Took some notes if you want them.';\n  is_v2 = true;\n} else {\n  text_1 = 'Pulled up ' + name + ' ' + dayRef + '... you\\'re at ' + reviewCount + ' reviews and the businesses ranking above you in ' + city + ' are sitting way higher. That\\'s most of the reason they\\'re getting your calls. Want me to send what I found?';\n}\n\nreturn [{ json: Object.assign({}, lead, { variant: variant, greeting: greeting, day_ref: dayRef, text_1: text_1, text_2_v2: text_2_v2, is_v2: is_v2, close_lead_id: closeLead.id, close_contact_id: (closeLead.contacts && closeLead.contacts[0]) ? closeLead.contacts[0].id : undefined }) }];"
+      },
+      "id": "v5-compute-t1",
+      "name": "v5: Compute Text 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('v5: Compute Text 1').item.json.is_v2 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1784038849179-j0o3fi300"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "v5-if-v2",
+      "name": "Variant Is V2?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3648,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "minutes"
+      },
+      "id": "v5-wait-3min",
+      "name": "Wait 3min (V2 only)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3840,
+        528
+      ],
+      "webhookId": "40409fcc-cedb-4866-9211-b1c772afcfd3",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $('v5: Compute Text 1').item.json.close_lead_id, contact_id: $('v5: Compute Text 1').item.json.close_contact_id, direction: 'outbound', status: 'outbox', local_phone: $('v5: Compute Text 1').item.json.sender_phone, remote_phone: $('v5: Compute Text 1').item.json.phone, text: $('v5: Compute Text 1').item.json.text_2_v2 }) }}",
+        "options": {}
+      },
+      "id": "v5-close-sms-t2",
+      "name": "Close SMS - Text 2 (V2)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4032,
+        528
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/v2-queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('v5: Compute Text 1').item.json.convex_id, closeLeadId: $('v5: Compute Text 1').item.json.close_lead_id, senderPhone: $('v5: Compute Text 1').item.json.sender_phone, recipientPhone: $('v5: Compute Text 1').item.json.phone, text: $('v5: Compute Text 1').item.json.text_2_v2, track: 'new' }) }}",
+        "options": {}
+      },
+      "id": "cvx-queue-v2",
+      "name": "Convex queue V2 2nd text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2304,
+        624
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily 7:30/8:30/9:30/10:30 AM ET": {
+      "main": [
+        [
+          {
+            "node": "GET Convex /daily-batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Convex /daily-batch": {
+      "main": [
+        [
+          {
+            "node": "Split to items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split to items": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign Senders": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (10)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Batches (10)": {
+      "main": [
+        [
+          {
+            "node": "Slack: send summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close Duplicate Check": {
+      "main": [
+        [
+          {
+            "node": "Not Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "TCPA Time Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Convex /update-status (dup)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex /update-status (dup)": {
+      "main": [
+        [
+          {
+            "node": "Slack: Duplicate Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Duplicate Skipped": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TCPA Time Check": {
+      "main": [
+        [
+          {
+            "node": "Within TCPA Window?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within TCPA Window?": {
+      "main": [
+        [
+          {
+            "node": "Close POST /lead/",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: TCPA Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: TCPA Skipped": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close POST /lead/": {
+      "main": [
+        [
+          {
+            "node": "Close Create OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close Create OK?": {
+      "main": [
+        [
+          {
+            "node": "Convex /mark-pushed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close SMS - Opener (Text 1)": {
+      "main": [
+        [
+          {
+            "node": "SMS Sent OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SMS Sent OK?": {
+      "main": [
+        [
+          {
+            "node": "Convex /sms-activities/log (opener)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: SMS Failed (opener)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: SMS Failed (opener)": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex /sms-activities/log (opener)": {
+      "main": [
+        [
+          {
+            "node": "Convex /record-sms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex /record-sms": {
+      "main": [
+        [
+          {
+            "node": "Close PUT cf SMS Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 1.5s (rate-limit)": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (10)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Assign Senders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex /mark-pushed": {
+      "main": [
+        [
+          {
+            "node": "v5: Compute Text 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "v5: Compute Text 1": {
+      "main": [
+        [
+          {
+            "node": "Close SMS - Opener (Text 1)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close PUT cf SMS Count": {
+      "main": [
+        [
+          {
+            "node": "Variant Is V2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Variant Is V2?": {
+      "main": [
+        [
+          {
+            "node": "Convex queue V2 2nd text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 3min (V2 only)": {
+      "main": [
+        [
+          {
+            "node": "Close SMS - Text 2 (V2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close SMS - Text 2 (V2)": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex queue V2 2nd text": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s (rate-limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "binaryMode": "separate",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "active": false
+}

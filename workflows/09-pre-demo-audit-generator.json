@@ -1,0 +1,230 @@
+{
+  "name": "WF-REV-AUDIT \u2014 Pre-Demo Audit Generator",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook (Close Lead Enriched)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf-rev-audit",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "notes": "Trigger: Close CRM lead moves to 'Enriched' status",
+      "webhookId": "f11a6a8f-0bb4-41cd-b19b-3d806b4a4452"
+    },
+    {
+      "id": "2",
+      "name": "Extract Lead Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const lead = $input.first().json.body?.event?.data || {};\nreturn [{ json: { leadId: lead.id, businessName: lead.name, city: lead.custom?.cf_reviewSalesCity, niche: 'roofers', placeId: lead.custom?.cf_reviewSalesGooglePlaceId } }];"
+      }
+    },
+    {
+      "id": "3",
+      "name": "SerpAPI \u2014 Business + Competitors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://serpapi.com/search.json?engine=google_maps&q={{ encodeURIComponent($json.niche + ' ' + $json.city) }}&api_key={{ $env.SERPAPI_KEY }}",
+        "options": {}
+      },
+      "notes": "Top competitors + client review data via SerpAPI local pack"
+    },
+    {
+      "id": "4",
+      "name": "Claude Build Audit Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.OPENROUTER_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'anthropic/claude-haiku-4-5-20251001', max_tokens: 1000, messages: [ { role: 'system', content: 'Generate a 1-page Markdown audit comparing this business to its top 3 local competitors. Include: current review count, avg rating, monthly review velocity, competitor comparison table, 1-sentence recommendation.' }, { role: 'user', content: `Business: ${$node['Extract Lead Data'].json.businessName}\\nCity: ${$node['Extract Lead Data'].json.city}\\nSerpAPI data: ${JSON.stringify($json.local_results?.slice(0,5))}` } ] }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "Generate PDF (PDFMonkey)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.pdfmonkey.io/api/v1/documents",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.PDFMONKEY_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ document: { document_template_id: 'TEMPLATE_ID_PLACEHOLDER', payload: { markdown: $json.choices[0].message.content, businessName: $node['Extract Lead Data'].json.businessName } } }) }}",
+        "options": {}
+      },
+      "notes": "Render Markdown to PDF via PDFMonkey"
+    },
+    {
+      "id": "6",
+      "name": "Update Close Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.close.com/api/v1/lead/{{ $node['Extract Lead Data'].json.leadId }}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ 'custom.cf_reviewSalesAuditUrl': $json.document.download_url }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "7",
+      "name": "Slack Notify Audit Ready",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK-ENGINE-OPS/PLACEHOLDER",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ text: `\ud83d\udcc4 Audit ready for ${$node['Extract Lead Data'].json.businessName}` }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (Close Lead Enriched)": {
+      "main": [
+        [
+          {
+            "node": "Extract Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Lead Data": {
+      "main": [
+        [
+          {
+            "node": "SerpAPI \u2014 Business + Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI \u2014 Business + Competitors": {
+      "main": [
+        [
+          {
+            "node": "Claude Build Audit Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Build Audit Content": {
+      "main": [
+        [
+          {
+            "node": "Generate PDF (PDFMonkey)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate PDF (PDFMonkey)": {
+      "main": [
+        [
+          {
+            "node": "Update Close Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Close Lead": {
+      "main": [
+        [
+          {
+            "node": "Slack Notify Audit Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

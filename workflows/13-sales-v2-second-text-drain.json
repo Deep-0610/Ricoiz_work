@@ -1,0 +1,270 @@
+{
+  "name": "WF-REV-SL-01B V2 Second-Text Drain",
+  "nodes": [
+    {
+      "id": "trg",
+      "name": "Every 2 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/2 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get-due",
+      "name": "GET v2-due",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/v2-due?limit=100",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "split",
+      "name": "Split queue items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "jsCode": "var items = ($input.first().json.items) || [];\nreturn items.map(function(i){ return { json: i }; });"
+      }
+    },
+    {
+      "id": "loop",
+      "name": "Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "options": {}
+      }
+    },
+    {
+      "id": "send",
+      "name": "Close SMS 2nd text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        880,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.closeLeadId, direction: 'outbound', status: 'outbox', local_phone: $json.senderPhone, remote_phone: $json.recipientPhone, text: $json.text }) }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "sentok",
+      "name": "Sent OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1100,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mark",
+      "name": "Mark sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1320,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/v2-mark-sent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $('Loop').item.json.id, closeActivityId: $json.id }) }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wait",
+      "name": "Wait 1.5s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        400
+      ],
+      "parameters": {
+        "amount": 1.5
+      },
+      "webhookId": "v2drain-wait-2f80"
+    }
+  ],
+  "connections": {
+    "Every 2 min": {
+      "main": [
+        [
+          {
+            "node": "GET v2-due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET v2-due": {
+      "main": [
+        [
+          {
+            "node": "Split queue items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split queue items": {
+      "main": [
+        [
+          {
+            "node": "Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Close SMS 2nd text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close SMS 2nd text": {
+      "main": [
+        [
+          {
+            "node": "Sent OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sent OK?": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 1.5s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark sent": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 1.5s": {
+      "main": [
+        [
+          {
+            "node": "Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

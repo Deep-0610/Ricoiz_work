@@ -1,0 +1,189 @@
+{
+  "name": "WF-REV-03 \u2014 Reactivation Trickler",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Every 12 Min Mon-Fri 9AM-7PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/12 9-19 * * 1-5"
+            }
+          ]
+        }
+      },
+      "notes": "Adam's 2-3 every 20 min pace = ~50/day/client cap"
+    },
+    {
+      "id": "2",
+      "name": "GET Active Batches",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/active-reactivations",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Returns clients with pending reactivation batches",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "3",
+      "name": "Split by Client",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "fieldToSplitOut": "clients",
+        "options": {}
+      }
+    },
+    {
+      "id": "4",
+      "name": "Loop Clients (5)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "Insert Next 3 Customers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/reactivation-tick",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ clientId: $json.clientId, batchSize: 3 }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Inserts 3 customers into main drip queue with jobCompletedAt = now - 3hr",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "6",
+      "name": "Wait 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      }
+    }
+  ],
+  "connections": {
+    "Every 12 Min Mon-Fri 9AM-7PM": {
+      "main": [
+        [
+          {
+            "node": "GET Active Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Active Batches": {
+      "main": [
+        [
+          {
+            "node": "Split by Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split by Client": {
+      "main": [
+        [
+          {
+            "node": "Loop Clients (5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Clients (5)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Insert Next 3 Customers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Next 3 Customers": {
+      "main": [
+        [
+          {
+            "node": "Wait 2s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2s": {
+      "main": [
+        [
+          {
+            "node": "Loop Clients (5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

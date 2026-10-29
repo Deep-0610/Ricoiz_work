@@ -1,0 +1,566 @@
+{
+  "name": "WF-REV-DEMO-SEND On-Demand Demo SMS",
+  "nodes": [
+    {
+      "id": "trg-webhook",
+      "name": "Close Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        208
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rev-demo-send-trigger",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "webhookId": "738e31c8-3a77-488e-8716-dc65b013afef"
+    },
+    {
+      "id": "if-triggers",
+      "name": "Demo Send flipped True? (reviewsales)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        208,
+        208
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ ($json.body && $json.body.event && $json.body.event.changed_fields || []).includes('custom.cf_jzCWHBXVcfU6JlYV1G6cjK72gpItQeYAvKGCtrtpO1C') }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1783800317091-dxw1vsncf"
+            },
+            {
+              "leftValue": "={{ $json.body && $json.body.event && $json.body.event.data && $json.body.event.data['custom.cf_jzCWHBXVcfU6JlYV1G6cjK72gpItQeYAvKGCtrtpO1C'] }}",
+              "rightValue": "True",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "condition-1783800317092-7ylvlyzwx"
+            },
+            {
+              "leftValue": "={{ $json.body && $json.body.event && $json.body.event.data && $json.body.event.data['custom.cf_bWgM0fxF58n1BO5YElBmJcuTV1CzDw5sIGY3wa3b51u'] }}",
+              "rightValue": "reviewsales",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "condition-1783800317092-c9l9amj1i"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "http-get-lead",
+      "name": "Close GET full lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        400,
+        128
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.close.com/api/v1/lead/{{ $json.body.event.data.id }}/?_fields=id,display_name,contacts,custom",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "http-sticky",
+      "name": "Close GET SMS history (sticky sender)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        592,
+        128
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.close.com/api/v1/activity/sms/?lead_id={{ $json.id }}&direction=outbound&_order_by=-date_created&_limit=1&_fields=id,local_phone,date_created",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "code-build",
+      "name": "Build Demo SMS Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        128
+      ],
+      "parameters": {
+        "jsCode": "var lead = $('Close GET full lead').item.json;\nvar hist = $input.first().json;\nvar contacts = lead.contacts || [];\nvar c0 = contacts[0] || {};\nvar phones = c0.phones || [];\nvar remote_phone = phones[0] ? phones[0].phone : null;\nvar convex_id = lead['custom.cf_QaXxtdAmTEByJ8SOBFk4wizgJwrwZF7XtSufDkTCP2x'] || '';\nvar cf_sender = lead['custom.cf_j6QkeiU0nlzk0kgngkIENCSHEu7LxJ3NsBN0TgvkzKT'] || null;\nvar lastOut = (hist && hist.data && hist.data[0]) ? hist.data[0] : null;\nvar sender = lastOut ? lastOut.local_phone : cf_sender;\nvar businessName = lead.display_name || 'your business';\nvar text = 'here\\'s your audit for ' + businessName + ': https://YOUR_APP_HOST/audit?l=' + convex_id + '\\n\\nquick look at the review gap + 90-sec walkthrough of the fix.';\nreturn [{ json: { lead_id: lead.id, contact_id: c0.id || null, remote_phone: remote_phone, sender_phone: sender, text: text, convex_id: convex_id, businessName: businessName } }];"
+      }
+    },
+    {
+      "id": "http-send-sms",
+      "name": "Close POST /activity/sms/",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        976,
+        128
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.lead_id, contact_id: $json.contact_id, direction: 'outbound', status: 'outbox', local_phone: $json.sender_phone, remote_phone: $json.remote_phone, text: $json.text }) }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "if-sent",
+      "name": "SMS sent OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1168,
+        128
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cvx-record",
+      "name": "Convex /sales-record-demo-sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1360,
+        48
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-record-demo-sent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ leadId: $('Build Demo SMS Body').item.json.convex_id, senderPhone: $('Build Demo SMS Body').item.json.sender_phone, closeActivityId: $json.id }) }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "http-close-flip",
+      "name": "Close PUT reset Demo Send=False",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1552,
+        48
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.close.com/api/v1/lead/{{ $('Build Demo SMS Body').item.json.lead_id }}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ 'custom.cf_jzCWHBXVcfU6JlYV1G6cjK72gpItQeYAvKGCtrtpO1C': 'False' }) }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "slack-sent",
+      "name": "Slack: Demo Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1744,
+        48
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'REV AUDIT SENT: ' + ($('Build Demo SMS Body').item.json.businessName || '?') + ' via ' + ($('Build Demo SMS Body').item.json.sender_phone || '?') }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "slack-fail",
+      "name": "Slack: Demo Send Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1360,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_SLACK_WEBHOOK",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: 'REV AUDIT SEND FAILED: ' + ($('Build Demo SMS Body').item.json.businessName || '?') }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "f78f7b1d-a7a0-499d-9a99-e23808d3424e",
+      "name": "Track Is Old",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        976,
+        128
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.track }}",
+              "rightValue": "old",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "condition-1783978664069-q1aej47r2"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9887ff3a-df8d-452e-ac53-9188938ecd46",
+      "name": "Close POST SMS NEW",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1168,
+        240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.lead_id, contact_id: $json.contact_id, direction: 'outbound', status: 'outbox', local_phone: $json.sender_phone, remote_phone: $json.remote_phone, text: $json.text }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "bf4e1bec-682a-44ab-bdb7-aa75d5f55cc7",
+      "name": "Track Is Old For Reset",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1552,
+        128
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Build Demo SMS Body').item.json.track }}",
+              "rightValue": "old",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "condition-1783978664069-3fouegk9s"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8eb4abff-a9be-45ba-9514-efc798d5f4c3",
+      "name": "Close PUT reset NEW",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1744,
+        240
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.close.com/api/v1/lead/{{ $('Build Demo SMS Body').item.json.lead_id }}/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ 'custom.cf_jzCWHBXVcfU6JlYV1G6cjK72gpItQeYAvKGCtrtpO1C': 'False' }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    }
+  ],
+  "connections": {
+    "Close Webhook": {
+      "main": [
+        [
+          {
+            "node": "Demo Send flipped True? (reviewsales)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Demo Send flipped True? (reviewsales)": {
+      "main": [
+        [
+          {
+            "node": "Close GET full lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close GET full lead": {
+      "main": [
+        [
+          {
+            "node": "Close GET SMS history (sticky sender)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close GET SMS history (sticky sender)": {
+      "main": [
+        [
+          {
+            "node": "Build Demo SMS Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close POST /activity/sms/": {
+      "main": [
+        [
+          {
+            "node": "SMS sent OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SMS sent OK?": {
+      "main": [
+        [
+          {
+            "node": "Convex /sales-record-demo-sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: Demo Send Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close PUT reset Demo Send=False": {
+      "main": [
+        [
+          {
+            "node": "Slack: Demo Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Demo SMS Body": {
+      "main": [
+        [
+          {
+            "node": "Track Is Old",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Is Old": {
+      "main": [
+        [
+          {
+            "node": "Close POST /activity/sms/",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close POST SMS NEW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close POST SMS NEW": {
+      "main": [
+        [
+          {
+            "node": "SMS sent OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex /sales-record-demo-sent": {
+      "main": [
+        [
+          {
+            "node": "Track Is Old For Reset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Is Old For Reset": {
+      "main": [
+        [
+          {
+            "node": "Close PUT reset Demo Send=False",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Close PUT reset NEW",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close PUT reset NEW": {
+      "main": [
+        [
+          {
+            "node": "Slack: Demo Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

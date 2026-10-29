@@ -1,0 +1,520 @@
+{
+  "name": "WF-REV-INBOUND \u2014 Reply Router",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Webhook (Close Inbound)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf-rev-inbound",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "notes": "Trigger: ALL Close CRM inbound SMS \u2014 routes to appropriate handler",
+      "webhookId": "55057890-3358-4af7-9d08-6743739cd982",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2",
+      "name": "Extract SMS Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        400
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const d = $input.first().json.body?.event?.data || {};\n\n// H5: Guard \u2014 only process inbound SMS. Skip our own outbound so we never loop.\nif (d.direction && d.direction !== 'inbound') return [];\n\nconst text = (d.text || '').trim();\nconst textLower = text.toLowerCase();\n\n// H1 + H2: STOP detection \u2014 narrow, unambiguous opt-out signals only.\n// Fires when the message is EITHER a short one-word opt-out (< 20 chars),\n// OR contains a clear multi-word opt-out phrase.\nconst shortStopWords = /^(stop|stopall|unsubscribe|revoke|remove|delete|end|quit|cancel)[\\.\\!\\?]*$/i;\nconst phraseStop = /\\b(please stop|opt.?out|remove me|delete me|unsubscribe|revoke|stopall|no more|don'?t text me|do not text|take me off)\\b/i;\nconst isStop = (text.length < 20 && shortStopWords.test(text)) || phraseStop.test(text);\n\n// H3: Snooze \u2014 allow trailing punctuation and 'yes please' style responses.\nconst isSnooze = /^(yes|snooze)( please)?[\\.\\!\\?]*$/i.test(text);\n\n// H4: HELP \u2014 word-boundary match, but only if we've already ruled out STOP.\n// (Order matters downstream: STOP is checked first in the router.)\nconst isHelp = !isStop && /\\bhelp\\b/i.test(text);\n\nreturn [{ json: { text, textLower, remotePhone: d.remote_phone, localPhone: d.local_phone, leadId: d.lead_id, contactId: d.contact_id, isStop, isSnooze, isHelp, activityId: d.id } }];"
+      }
+    },
+    {
+      "id": "3",
+      "name": "Route: STOP?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        680,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isStop }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "id": "condition-1783697701852-xb8ruz0ou"
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        }
+      }
+    },
+    {
+      "id": "4",
+      "name": "POST Opt-Out",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/opt-out",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ phone: $json.remotePhone, reason: 'stop_reply' }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Global opt-out (across all clients)",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "5",
+      "name": "Route: Snooze?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        900,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Extract SMS Data').item.json.isSnooze }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1783721416096-qa96vmv0y"
+            },
+            {
+              "leftValue": "={{ Boolean($json.clientId) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1783721416096-fbvm19fgz"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "6",
+      "name": "POST Snooze",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/intake-snoozed",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ ownerPhone: $json.remotePhone, snoozeDays: 7 }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "7",
+      "name": "Claude Sentiment Classifier",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENROUTER_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'anthropic/claude-haiku-4-5-20251001', max_tokens: 10, messages: [ { role: 'system', content: 'Classify SMS reply sentiment. Reply with ONE word only: positive, neutral, or negative.' }, { role: 'user', content: $node['Extract SMS Data'].json.text } ] }) }}",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "notes": "Classify customer reply as positive/neutral/negative",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "8",
+      "name": "POST Check-in Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1340,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/checkin-reply",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ closeLeadId: $('Extract SMS Data').item.json.leadId, text: $('Extract SMS Data').item.json.text, sentiment: $json.choices[0].message.content.trim().toLowerCase() }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "9",
+      "name": "Alert Owner if Negative",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1560,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.alertOwner }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1783721377804-ec4wpx55z"
+            }
+          ],
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Text Owner (Service Recovery)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1780,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $json.ownerAlertLocalPhone, remote_phone: $json.ownerPhone, text: '\ud83d\udea8 ' + $json.customerFirstName + ' just replied to your check-in: \\'' + $json.customerReply + '\\' \u2014 give them a call. Review request suppressed.' }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "7a37a02c-695c-4df4-986f-319a300a6cb4",
+      "name": "Route: HELP?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        900,
+        600
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isHelp }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-1783697701852-zf7sy804o"
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "1f31dfe4-4650-4ff6-a3c7-fdff0381b4ba",
+      "name": "SMS Help Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        700
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $json.localPhone, remote_phone: $json.remotePhone, text: 'Reply STOP to unsubscribe. Msg&data rates may apply. Reply YES to snooze 7 days.' }) }}",
+        "options": {}
+      },
+      "notes": "TCPA-compliant HELP response",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "393b9cf4-9334-4e2c-ad0b-35b02892f6ad",
+      "name": "SMS Confirm Opt-Out",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Extract SMS Data'].json.localPhone, remote_phone: $node['Extract SMS Data'].json.remotePhone, text: 'You have been unsubscribed. No more messages will be sent. Reply START to resubscribe.' }) }}",
+        "options": {}
+      },
+      "notes": "CTIA opt-out acknowledgment",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "dd8280f7-3c0e-4c4b-aec8-000d3b28d5d8",
+      "name": "Lookup Sender Client",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1100,
+        500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://YOUR_CONVEX_DEPLOYMENT/reviews/client-by-intake-phone?intakePhone={{ encodeURIComponent($('Extract SMS Data').item.json.localPhone) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "notes": "Look up whether the sender texted the CLIENT INTAKE number (owner) or SENDER number (customer). Determines snooze eligibility.",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    }
+  ],
+  "connections": {
+    "Webhook (Close Inbound)": {
+      "main": [
+        [
+          {
+            "node": "Extract SMS Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract SMS Data": {
+      "main": [
+        [
+          {
+            "node": "Route: STOP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: STOP?": {
+      "main": [
+        [
+          {
+            "node": "POST Opt-Out",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: HELP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Snooze?": {
+      "main": [
+        [
+          {
+            "node": "POST Snooze",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude Sentiment Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Sentiment Classifier": {
+      "main": [
+        [
+          {
+            "node": "POST Check-in Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST Check-in Reply": {
+      "main": [
+        [
+          {
+            "node": "Alert Owner if Negative",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Owner if Negative": {
+      "main": [
+        [
+          {
+            "node": "Text Owner (Service Recovery)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "POST Opt-Out": {
+      "main": [
+        [
+          {
+            "node": "SMS Confirm Opt-Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: HELP?": {
+      "main": [
+        [
+          {
+            "node": "SMS Help Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup Sender Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Sender Client": {
+      "main": [
+        [
+          {
+            "node": "Route: Snooze?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

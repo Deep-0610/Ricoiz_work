@@ -1,0 +1,550 @@
+{
+  "name": "WF-REV-SL-04 AI Reply Classifier + Auto-Reply",
+  "nodes": [
+    {
+      "id": "trg-webhook",
+      "name": "Webhook Close Inbound (sales)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -16,
+        208
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wf-rev-sl-inbound",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "aa2a621c-0d2f-4192-9a36-b6aff4a978a9"
+    },
+    {
+      "id": "code-extract",
+      "name": "Extract SMS Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        208
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Extract inbound SMS payload from Close CRM webhook\nconst d = $input.first().json.body?.event?.data || {};\nif (d.direction !== 'inbound') return [];\nconst text = String(d.text || '').trim();\nif (!text) return [];\nreturn [{ json: { text, remotePhone: d.remote_phone, localPhone: d.local_phone, closeLeadId: d.lead_id, closeContactId: d.contact_id, activityId: d.id } }];"
+      }
+    },
+    {
+      "id": "http-get-lead",
+      "name": "Convex getByCloseLeadId",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        432,
+        208
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-get-by-close-lead?closeLeadId={{ $json.closeLeadId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "http-close-sms-hist",
+      "name": "Close GET last 5 msgs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        656,
+        208
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.close.com/api/v1/activity/sms/?lead_id={{ $('Extract SMS Data').item.json.closeLeadId }}&_order_by=-date_created&_limit=5&_fields=id,direction,text,date_created,local_phone,remote_phone",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "code-build-context",
+      "name": "Build AI Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        208
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Compose classifier + generator prompts with conversation history\nconst reply = $('Extract SMS Data').item.json;\nconst hist = ($('Close GET last 5 msgs').item.json.data || []).sort((a,b) => new Date(a.date_created) - new Date(b.date_created));\nconst historyText = hist.map(m => `${m.direction === 'outbound' ? 'US' : 'THEM'}: ${m.text || ''}`).join('\\n');\n\nconst classify_system_prompt = `You classify SMS replies from small-business owners (roofers, HVAC, plumbers, etc.) to our cold outreach selling a Google Reviews SMS service ($297/mo).\\n\\nOutput ONLY valid JSON with keys: intent, confidence (0-1), reasoning (1 sentence).\\n\\nIntent values:\\n- POSITIVE: interested, wants more info, wants demo, wants to book. Examples: 'sure', 'send it', 'yes', 'interested', 'call me', 'lets talk'.\\n- QUESTION: asks for pricing, how it works, timeline, credentials. Examples: 'how much', 'what is this', 'who are you', 'is this a bot'.\\n- NOT_INTERESTED: polite decline. Examples: 'no thanks', 'not interested right now', 'we're good'.\\n- STOP: legal opt-out. Examples: 'stop', 'unsubscribe', 'remove me', 'do not text'.\\n- HELP: asks for help info. Just 'HELP' or 'help me'.\\n- OOO: auto-reply / vacation.\\n- SPAM: bot-like reply.\\n- WRONG_INTENT: they think we want to hire THEM (asking about our roof/plumbing job). Examples: 'let me quote your job', 'send address', 'when do you need it done'.\\n- DEMO_BOOK: wants to schedule directly. Examples: 'send a calendar link', 'lets do a call tuesday'.`;\n\nconst generate_system_prompt = `You are Owner, sending casual SMS replies to small-business owners who replied to our cold outreach selling a Google Reviews SMS service ($297/mo, first 5 signups get $0 setup fee waived + 10-review guarantee).\\n\\nRULES:\\n- LOWERCASE, casual, first-person, no signature.\\n- MAX 160 chars.\\n- Never say 'AI', 'automated', 'bot', 'chatbot'.\\n- Never mention specific prices unless intent is QUESTION about pricing.\\n- If intent is POSITIVE or DEMO_BOOK: send Calendly link 'https://calendly.com/client-ai/review-engine-15min'.\\n- If intent is QUESTION about pricing: '$297/mo, cancel anytime. first 5 signups get $497 setup waived + 10-review guarantee. worth a 15 min? https://calendly.com/client-ai/review-engine-15min'.\\n- If intent is WRONG_INTENT: clarify 'sorry for the confusion, i'm not asking for a quote. i help {niche} businesses get more google reviews on autopilot. want a 60-sec overview?'.\\n- Never make up client names or reviews. Be honest.`;\n\nreturn [{ json: { ...reply, conversation_history: historyText, classify_system_prompt, generate_system_prompt } }];"
+      }
+    },
+    {
+      "id": "http-classify",
+      "name": "OpenRouter Classify (Sonnet 4.5)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1104,
+        208
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'anthropic/claude-sonnet-4.5', messages: [{ role: 'system', content: $json.classify_system_prompt }, { role: 'user', content: 'Their reply: \"' + $json.text + '\"\\n\\nRecent conversation:\\n' + ($json.conversation_history || '(none)') + '\\n\\nClassify. Output JSON only.' }], temperature: 0.1, response_format: { type: 'json_object' }, max_tokens: 300 }) }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "id": "code-parse-classify",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        208
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Parse Claude's JSON output\nconst reply = $('Build AI Context').item.json;\nlet parsed = { intent: 'QUESTION', confidence: 0.3, reasoning: 'default fallback' };\ntry {\n  const raw = ($input.first().json.choices?.[0]?.message?.content || '').trim();\n  const clean = raw.replace(/^```json\\s*/,'').replace(/```\\s*$/,'').trim();\n  parsed = JSON.parse(clean);\n} catch (e) {\n  // Fall back to default\n}\nreturn [{ json: { ...reply, intent: parsed.intent, classifyConfidence: parsed.confidence, classifyReasoning: parsed.reasoning } }];"
+      }
+    },
+    {
+      "id": "http-update-status",
+      "name": "Convex update-status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1552,
+        208
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/sales-update-status",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ closeLeadId: $json.closeLeadId, phone: $json.remotePhone, newStatus: ($json.intent === 'STOP') ? 'opted_out' : ($json.intent === 'POSITIVE' || $json.intent === 'DEMO_BOOK') ? 'positive' : ($json.intent === 'NOT_INTERESTED') ? 'closed_lost' : 'replied', lastReplyText: $json.text, lastReplyIntent: $json.intent }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "if-stop",
+      "name": "Is STOP?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1776,
+        208
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.intent === 'STOP' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "http-post-optout",
+      "name": "Convex POST /opt-out",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2000,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/opt-out",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ phone: $json.remotePhone, reason: 'stop_reply_sales' }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "if-generate-reply",
+      "name": "Should Auto-Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2000,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "or",
+          "options": {
+            "version": 2,
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "POSITIVE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "QUESTION",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "WRONG_INTENT",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "DEMO_BOOK",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "http-generate",
+      "name": "OpenRouter Generate Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2224,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'anthropic/claude-sonnet-4.5', messages: [{ role: 'system', content: $('Build AI Context').item.json.generate_system_prompt }, { role: 'user', content: 'Intent: ' + $json.intent + '\\nTheir reply: \"' + $json.text + '\"\\n\\nRecent conversation:\\n' + ($('Build AI Context').item.json.conversation_history || '(none)') + '\\n\\nWrite your reply. Raw SMS text only, no quotes, no JSON.' }], temperature: 0.4, max_tokens: 200 }) }}",
+        "options": {
+          "timeout": 45000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "id": "code-validate-reply",
+      "name": "Validate + Sticky Sender",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2448,
+        320
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Content filter + validate reply, derive sticky sender from Extract SMS Data.localPhone\nconst raw = ($input.first().json.choices?.[0]?.message?.content || '').trim();\nconst FALLBACK = 'hey, thanks for getting back. mind a 15 min call to walk through it? https://calendly.com/client-ai/review-engine-15min';\nconst BANNED = ['guarantee','free','promise',' bot ','automated','robot','chatbot',' ai '];\nlet text = raw.replace(/^```(?:text|sms)?\\s*/,'').replace(/```\\s*$/,'').replace(/^[\"']|[\"']$/g,'').trim();\ntext = text.replace(/[\u2014\u2013]/g,' ').replace(/\u2026/g,'...').replace(/[\u2018\u2019]/g,\"'\").replace(/[\u201c\u201d]/g,'\"').replace(/\\s+/g,' ').trim();\nconst low = ' ' + text.toLowerCase() + ' ';\nlet issues = [];\nif (!text) issues.push('empty');\nif (text.length > 320) issues.push('too_long');\nfor (const b of BANNED) if (low.indexOf(b) !== -1) issues.push('banned:' + b.trim());\nconst finalText = issues.length ? FALLBACK : text;\n\nconst inbound = $('Extract SMS Data').item.json;\nreturn [{ json: { ...inbound, aiReplyText: finalText, aiValidated: issues.length === 0, validationIssues: issues, replySenderPhone: inbound.localPhone } }];"
+      }
+    },
+    {
+      "id": "http-send-reply",
+      "name": "Close Send AI Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2672,
+        320
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ lead_id: $json.closeLeadId, direction: 'outbound', status: 'outbox', local_phone: $json.replySenderPhone, remote_phone: $json.remotePhone, text: $json.aiReplyText }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "http-close-lead-check",
+      "name": "Close GET lead custom",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        432,
+        96
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.close.com/api/v1/lead/{{ $json.closeLeadId }}/?_fields=id,custom.cf_bWgM0fxF58n1BO5YElBmJcuTV1CzDw5sIGY3wa3b51u",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {}
+      },
+      "notes": "Fetches Close CRM lead custom.lead field to check if this is a reviewsales pipeline lead",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "if-is-reviewsales",
+      "name": "Is Reviewsales Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        656,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json['custom.cf_bWgM0fxF58n1BO5YElBmJcuTV1CzDw5sIGY3wa3b51u'] }}",
+              "rightValue": "reviewsales",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "condition-1783780939664-p36bybinw"
+            }
+          ]
+        }
+      },
+      "notes": "Only continue if custom.lead == 'reviewsales'. Otherwise let other webhook handlers process it."
+    }
+  ],
+  "connections": {
+    "Webhook Close Inbound (sales)": {
+      "main": [
+        [
+          {
+            "node": "Extract SMS Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex getByCloseLeadId": {
+      "main": [
+        [
+          {
+            "node": "Close GET last 5 msgs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close GET last 5 msgs": {
+      "main": [
+        [
+          {
+            "node": "Build AI Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Context": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter Classify (Sonnet 4.5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Classify (Sonnet 4.5)": {
+      "main": [
+        [
+          {
+            "node": "Parse Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Classification": {
+      "main": [
+        [
+          {
+            "node": "Convex update-status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convex update-status": {
+      "main": [
+        [
+          {
+            "node": "Is STOP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is STOP?": {
+      "main": [
+        [
+          {
+            "node": "Convex POST /opt-out",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Should Auto-Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Auto-Reply?": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter Generate Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Generate Reply": {
+      "main": [
+        [
+          {
+            "node": "Validate + Sticky Sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate + Sticky Sender": {
+      "main": [
+        [
+          {
+            "node": "Close Send AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract SMS Data": {
+      "main": [
+        [
+          {
+            "node": "Close GET lead custom",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close GET lead custom": {
+      "main": [
+        [
+          {
+            "node": "Is Reviewsales Lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Reviewsales Lead?": {
+      "main": [
+        [
+          {
+            "node": "Convex getByCloseLeadId",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

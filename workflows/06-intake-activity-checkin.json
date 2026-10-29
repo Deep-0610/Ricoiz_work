@@ -1,0 +1,292 @@
+{
+  "name": "WF-REV-06 \u2014 Intake Activity Check-in",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Daily 10AM ET",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "notes": "Daily 10AM ET \u2014 catches inactive clients before they churn"
+    },
+    {
+      "id": "2",
+      "name": "GET Inactive Clients",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/inactive-clients?daysInactive=7",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "notes": "Returns clients where lastIntakeAt > 7 days AND not snoozed",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "3",
+      "name": "Split to Items",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "fieldToSplitOut": "clients",
+        "options": {}
+      }
+    },
+    {
+      "id": "4",
+      "name": "Loop Batches (5)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "Build Alert SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// H2 fix: null-guard ownerPhone / ownerFirstName. Skip items missing either field\n// so we never SMS to null and never send a garbled '${undefined}' body.\nconst results = [];\nfor (const it of $input.all()) {\n  const c = it.json || {};\n  const phone = (c.ownerPhone || '').trim();\n  const first = (c.ownerFirstName || '').trim();\n  if (!phone || !first) continue; // silently skip incomplete records\n  const text = `Hey ${first}, haven't heard from you in a week. Everything OK with Review Engine? Reply YES to snooze this alert, HELP for support.`;\n  results.push({ json: { ...c, ownerPhone: phone, ownerFirstName: first, text } });\n}\nreturn results;"
+      }
+    },
+    {
+      "id": "6",
+      "name": "Close SMS Send to Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.close.com/api/v1/activity/sms/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $json.intakePhone, remote_phone: $json.ownerPhone, text: $json.text }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "7",
+      "name": "Mark Alert Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1560,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/intake-alert-sent",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ clientId: $json.id }) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "8",
+      "name": "Wait 1.5s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1780,
+        300
+      ],
+      "parameters": {
+        "amount": 1.5,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "3b8234a8-53e4-424f-9fd5-b05d26ebf4b4",
+      "name": "Close Send OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1450,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ Boolean($json.id) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "condition-close-send-ok"
+            }
+          ]
+        }
+      },
+      "notes": "Guard: only proceed to Mark Alert Sent if the Close SMS send succeeded (response has an id). Prevents false 'sent' state on failure."
+    }
+  ],
+  "connections": {
+    "Daily 10AM ET": {
+      "main": [
+        [
+          {
+            "node": "GET Inactive Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Inactive Clients": {
+      "main": [
+        [
+          {
+            "node": "Split to Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split to Items": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Batches (5)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Build Alert SMS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert SMS": {
+      "main": [
+        [
+          {
+            "node": "Close SMS Send to Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Alert Sent": {
+      "main": [
+        [
+          {
+            "node": "Wait 1.5s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 1.5s": {
+      "main": [
+        [
+          {
+            "node": "Loop Batches (5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close SMS Send to Owner": {
+      "main": [
+        [
+          {
+            "node": "Close Send OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close Send OK?": {
+      "main": [
+        [
+          {
+            "node": "Mark Alert Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}

@@ -1,0 +1,301 @@
+{
+  "name": "WF-REV-05 \u2014 Weekly Competitor Report",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Monday 9AM ET",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "notes": "Weekly on Monday 9AM ET \u2014 the retention weapon"
+    },
+    {
+      "id": "2",
+      "name": "GET Active Clients",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/active-clients",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "3",
+      "name": "Split Clients",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "fieldToSplitOut": "clients",
+        "options": {}
+      }
+    },
+    {
+      "id": "4",
+      "name": "Loop Clients (5)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "GBP \u2014 Client Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://mybusiness.googleapis.com/v4/accounts/{{ $json.gbpAccountId }}/locations/{{ $json.gbpLocationId }}/reviews?pageSize=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.gbpAccessToken }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Get client's current review count + avg rating",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "6",
+      "name": "SerpAPI \u2014 Competitors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://serpapi.com/search.json?engine=google_maps&q={{ encodeURIComponent($node['Loop Clients (5)'].json.niche + ' ' + $node['Loop Clients (5)'].json.competitorCity) }}&api_key={{ $env.SERPAPI_KEY }}",
+        "options": {}
+      },
+      "notes": "Pull top competitors data from SerpAPI",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "7",
+      "name": "Build Report Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const client = $node['Loop Clients (5)'].json;\nconst clientReviews = $node['GBP \u2014 Client Data'].json;\nconst serpData = $node['SerpAPI \u2014 Competitors'].json;\n\nconst competitors = (serpData.local_results || []).slice(0, 3).map(r => ({\n  name: r.title,\n  reviewCount: r.reviews || 0,\n  avgRating: r.rating || 0\n}));\n\nconst report = {\n  clientId: client.id,\n  weekOf: Date.now(),\n  clientBusinessName: client.businessName,\n  clientReviewCount: clientReviews.averageRating?.count || 0,\n  clientAvgRating: clientReviews.averageRating || 0,\n  competitors\n};\n\nreturn [{ json: report }];"
+      }
+    },
+    {
+      "id": "8",
+      "name": "Save Snapshot to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1780,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/competitor-snapshot",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "9",
+      "name": "Send Email via Postmark",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2000,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.postmarkapp.com/email",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Postmark-Server-Token",
+              "value": "={{ $env.POSTMARK_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify({ From: 'user@example.com', To: $node['Loop Clients (5)'].json.ownerEmail, Subject: 'Your Review Engine Report \u2014 ' + $json.clientBusinessName + ' vs Competitors', HtmlBody: '<h1>Weekly Report</h1><p>TODO: Template renders competitor comparison</p>' }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    }
+  ],
+  "connections": {
+    "Monday 9AM ET": {
+      "main": [
+        [
+          {
+            "node": "GET Active Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Active Clients": {
+      "main": [
+        [
+          {
+            "node": "Split Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Clients": {
+      "main": [
+        [
+          {
+            "node": "Loop Clients (5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Clients (5)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "GBP \u2014 Client Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GBP \u2014 Client Data": {
+      "main": [
+        [
+          {
+            "node": "SerpAPI \u2014 Competitors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI \u2014 Competitors": {
+      "main": [
+        [
+          {
+            "node": "Build Report Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report Data": {
+      "main": [
+        [
+          {
+            "node": "Save Snapshot to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Snapshot to Convex": {
+      "main": [
+        [
+          {
+            "node": "Send Email via Postmark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email via Postmark": {
+      "main": [
+        [
+          {
+            "node": "Loop Clients (5)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "active": false
+}
