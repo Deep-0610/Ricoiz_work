@@ -1,9 +1,9 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Review Engine — Google Reviews on Autopilot for Roofers",
+  title: "Ricoiz — Local Business Review & Reputation Aggregator",
   description:
-    "$297/mo done-for-you Google Reviews service. 3-message SMS drip. AI review responses. 10 reviews in 30 days or your next month is free.",
+    "Unify Google, Yelp, and Facebook reviews in one workspace with consent-aware automated review-request SMS sequences and reputation insights.",
 };
 
 export default function RootLayout({ children }) {
