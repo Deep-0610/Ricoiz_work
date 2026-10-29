@@ -1,213 +1,93 @@
+const platforms = [
+  { name: "Google", mark: "G", detail: "Business Profile reviews" },
+  { name: "Yelp", mark: "Y", detail: "Local discovery feedback" },
+  { name: "Facebook", mark: "f", detail: "Page recommendations" },
+];
+
+const features = [
+  { number: "01", title: "One reputation inbox", description: "Bring Google, Yelp, and Facebook feedback into one clear workspace so your team spends less time switching tabs." },
+  { number: "02", title: "Consent-aware SMS requests", description: "Set up customer follow-ups after a service or visit, with opt-out handling and quiet-hour checks built into the workflow." },
+  { number: "03", title: "Faster, thoughtful replies", description: "Organize response work, draft helpful replies, and keep a human review step for sensitive or negative feedback." },
+  { number: "04", title: "Reputation insights", description: "Track review volume, average ratings, response coverage, and trends by connected platform when real data is available." },
+];
+
+const steps = [
+  { title: "Connect your profiles", description: "Add the business profiles and review links you want to monitor." },
+  { title: "Configure follow-ups", description: "Review your message templates, consent source, opt-out behavior, and send windows." },
+  { title: "Manage everything together", description: "Review feedback, coordinate replies, and monitor reputation activity from one dashboard." },
+];
+
 export default function HomePage() {
   return (
-    <main>
-      {/* HERO */}
-      <section className="bg-gradient-to-br from-brand-dark to-brand py-24 text-white">
-        <div className="mx-auto max-w-5xl px-6">
-          <p className="mb-4 text-sm font-medium uppercase tracking-widest text-brand-light">
-            For Roofers Only
-          </p>
-          <h1 className="mb-6 text-5xl font-bold leading-tight md:text-6xl">
-            Google Reviews on Autopilot.
-            <br />
-            <span className="text-brand-light">10 new reviews in 30 days,</span> or your next month is free.
-          </h1>
-          <p className="mb-8 max-w-2xl text-xl text-brand-light/90">
-            Text us your customer. We send 3 texts, respond to reviews with AI, and email you a weekly report showing you vs. your top 3 local competitors.
-          </p>
-          <div className="flex flex-wrap gap-4">
-            <a
-              href="#pricing"
-              className="rounded-lg bg-white px-8 py-4 font-bold text-brand-dark shadow-lg transition hover:bg-brand-light hover:text-white"
-            >
-              Get Started — $297/mo
-            </a>
-            <a
-              href="https://calendly.com/review-engine/demo"
-              className="rounded-lg border-2 border-white bg-transparent px-8 py-4 font-bold text-white transition hover:bg-white hover:text-brand-dark"
-            >
-              Book a 15-min Demo
-            </a>
-          </div>
+    <main className="overflow-hidden">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
+          <a href="/" className="text-2xl font-black tracking-tight text-brand-dark">Ricoiz<span className="text-brand">.</span></a>
+          <nav className="hidden items-center gap-8 text-sm font-semibold text-slate-600 md:flex">
+            <a href="#platforms" className="hover:text-brand-dark">Platforms</a>
+            <a href="#features" className="hover:text-brand-dark">Features</a>
+            <a href="#how-it-works" className="hover:text-brand-dark">How it works</a>
+          </nav>
+          <a href="/onboarding" className="rounded-lg bg-brand-dark px-5 py-3 text-sm font-bold text-white transition hover:bg-brand">Set up your business</a>
         </div>
-      </section>
+      </header>
 
-      {/* HOW IT WORKS */}
-      <section className="py-20">
-        <div className="mx-auto max-w-5xl px-6">
-          <h2 className="mb-12 text-center text-4xl font-bold">How It Works</h2>
-          <div className="grid gap-8 md:grid-cols-3">
-            <Step
-              n={1}
-              title="Text us your customer"
-              body='After every job, text customer name + phone to your dedicated line. Example: "Sarah Johnson +14155551234". That&apos;s your entire workflow.'
-            />
-            <Step
-              n={2}
-              title="We send 3 texts"
-              body="Check-in at 2hr → review request at 4hr → nudge 3 days later if no click. Unhappy customers get routed to you, not to Google."
-            />
-            <Step
-              n={3}
-              title="AI responds to every review"
-              body="Every Google review gets a warm, human response within 20 minutes. 5-star auto-post. Low-star reviewed by us before posting."
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* COMPETITOR REPORT */}
-      <section className="bg-slate-50 py-20">
-        <div className="mx-auto max-w-5xl px-6">
-          <h2 className="mb-6 text-4xl font-bold">Every Monday, You&apos;ll See This Email</h2>
-          <p className="mb-8 text-lg text-slate-600">
-            The weekly report that shows exactly where you stand against the roofers down the street.
-          </p>
-          <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-            <h3 className="mb-4 text-xl font-bold text-brand-dark">
-              Your Review Engine Report — Week of July 8
-            </h3>
-            <p className="mb-6 text-slate-700">
-              You this week: <strong>+7 new reviews</strong> (avg 4.9 stars)
-              <br />
-              Total: 48 reviews (up from 12 when you started)
-            </p>
-            <div className="mb-6">
-              <p className="mb-3 font-semibold text-slate-800">You vs. Your Top 3 Competitors:</p>
-              <ul className="space-y-2 text-slate-700">
-                <li>✓ You: 48 reviews (⭐ 4.9) — +7 this week</li>
-                <li>• Ohio Roof Pros: 89 reviews (⭐ 4.7) — +3 this week</li>
-                <li>• Cleveland Roofing: 71 reviews (⭐ 4.6) — +2 this week</li>
-                <li>• Buckeye Roofers: 65 reviews (⭐ 4.8) — +4 this week</li>
-              </ul>
+      <section className="relative bg-gradient-to-br from-brand-dark via-brand to-slate-900 py-20 text-white md:py-28">
+        <div className="mx-auto grid max-w-7xl items-center gap-14 px-6 lg:grid-cols-[1.1fr_.9fr]">
+          <div>
+            <p className="mb-5 inline-flex rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[.18em] text-teal-100">Local reputation, in one place</p>
+            <h1 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-6xl">Every review. Every platform. <span className="text-teal-200">One clear view.</span></h1>
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-100/90">Ricoiz brings your Google, Yelp, and Facebook reputation into a single workspace, with customer review-request SMS sequences and practical tools to keep feedback moving.</p>
+            <div className="mt-9 flex flex-wrap gap-4">
+              <a href="/onboarding" className="rounded-xl bg-white px-7 py-4 font-bold text-brand-dark shadow-lg transition hover:bg-teal-50">Set up your workspace <span aria-hidden="true">→</span></a>
+              <a href="/dashboard" className="rounded-xl border border-white/40 px-7 py-4 font-bold text-white transition hover:bg-white/10">Explore dashboard</a>
             </div>
-            <p className="rounded bg-green-50 p-4 font-semibold text-green-800">
-              You gained ground on 3 out of 3 competitors this week.
-            </p>
+            <p className="mt-5 text-xs leading-5 text-slate-200">Connectors, review data, and messaging activate only after the required account access and workflow configuration are complete.</p>
           </div>
-        </div>
-      </section>
 
-      {/* PRICING */}
-      <section id="pricing" className="py-20">
-        <div className="mx-auto max-w-3xl px-6">
-          <h2 className="mb-4 text-center text-4xl font-bold">Simple, Honest Pricing</h2>
-          <p className="mb-12 text-center text-lg text-slate-600">
-            No contracts. No hidden add-ons. Cancel with one click.
-          </p>
-          <div className="rounded-2xl border-2 border-brand p-8 shadow-xl">
-            <div className="mb-6 flex items-baseline">
-              <span className="text-5xl font-bold text-brand-dark">$297</span>
-              <span className="ml-2 text-xl text-slate-500">/month</span>
+          <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-2xl backdrop-blur-sm md:p-7">
+            <div className="flex items-center justify-between gap-4">
+              <div><p className="text-sm text-teal-100">Reputation workspace</p><h2 className="mt-1 text-xl font-bold">Your business at a glance</h2></div>
+              <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">Live data after setup</span>
             </div>
-            <p className="mb-6 text-slate-600">
-              + $497 one-time setup <span className="text-sm text-slate-400">(waived for first 5 clients)</span>
-            </p>
-            <ul className="mb-8 space-y-3 text-slate-700">
-              <li>✓ Unlimited SMS review requests</li>
-              <li>✓ Reactivation campaign for past customers</li>
-              <li>✓ AI review responses (4-5 star auto, 1-3 star human review)</li>
-              <li>✓ Dedicated sender + intake phone numbers</li>
-              <li>✓ Weekly competitor report</li>
-              <li>✓ Service recovery (unhappy customers routed to you)</li>
-              <li>✓ 30-day guarantee: 10 reviews or next month free</li>
-              <li>✓ US-based support, direct phone number</li>
-              <li>✓ Data export anytime, one CSV</li>
-            </ul>
-            <a
-              href={process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK || "/onboarding"}
-              className="block w-full rounded-lg bg-brand-dark py-4 text-center font-bold text-white transition hover:bg-brand"
-            >
-              Start Now — $297/mo
-            </a>
-            <p className="mt-4 text-center text-sm text-slate-500">
-              Powered by Stripe. Cancel anytime.
-            </p>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl bg-white p-4 text-slate-900"><p className="text-xs font-semibold text-slate-500">New reviews</p><p className="mt-2 text-3xl font-black">—</p><p className="mt-1 text-xs text-slate-500">Awaiting connection</p></div>
+              <div className="rounded-2xl bg-white p-4 text-slate-900"><p className="text-xs font-semibold text-slate-500">Average rating</p><p className="mt-2 text-3xl font-black">—</p><p className="mt-1 text-xs text-slate-500">Across connected sources</p></div>
+              <div className="col-span-2 rounded-2xl bg-slate-950/50 p-4">
+                <div className="flex items-center justify-between"><p className="font-semibold">Connected review sources</p><p className="text-xs text-teal-100">Set up to begin</p></div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">{platforms.map((platform) => <div key={platform.name} className="flex items-center gap-3 rounded-xl border border-white/15 bg-white/5 p-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-lg font-black text-brand-dark">{platform.mark}</span><div><p className="text-sm font-bold">{platform.name}</p><p className="text-[10px] text-slate-200">{platform.detail}</p></div></div>)}</div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* GUARANTEE */}
-      <section className="bg-brand-dark py-20 text-white">
-        <div className="mx-auto max-w-3xl px-6 text-center">
-          <h2 className="mb-6 text-4xl font-bold">The Guarantee</h2>
-          <p className="mb-8 text-2xl leading-relaxed">
-            <strong>10 new Google reviews in your first 30 days,</strong>
-            <br />
-            or your next month is <strong>free</strong>.
-          </p>
-          <p className="text-brand-light">
-            We reactivate your existing customer list (300-500 people) and reliably produce
-            15-30 reviews in the first two weeks. If we can&apos;t hit 10 in 30 days, you get a $297 credit.
-          </p>
-          <a
-            href="/guarantee"
-            className="mt-8 inline-block text-brand-light underline hover:text-white"
-          >
-            Read full guarantee terms →
-          </a>
+      <section id="platforms" className="border-b border-slate-100 bg-white py-12">
+        <div className="mx-auto max-w-7xl px-6">
+          <p className="text-center text-xs font-bold uppercase tracking-[.2em] text-slate-500">Designed around the places customers leave feedback</p>
+          <div className="mt-7 grid gap-4 md:grid-cols-3">{platforms.map((platform) => <div key={platform.name} className="flex items-center gap-4 rounded-2xl border border-slate-200 p-5"><span className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-50 text-xl font-black text-brand-dark">{platform.mark}</span><div><h3 className="font-bold text-slate-900">{platform.name}</h3><p className="mt-1 text-sm text-slate-500">{platform.detail}</p></div></div>)}</div>
         </div>
       </section>
 
-      {/* WEDGE */}
+      <section id="features" className="py-20 md:py-24">
+        <div className="mx-auto max-w-7xl px-6">
+          <div className="max-w-2xl"><p className="text-sm font-bold uppercase tracking-[.18em] text-brand">Built for local businesses</p><h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900 md:text-4xl">From scattered feedback to a reputation you can manage.</h2><p className="mt-4 text-lg leading-8 text-slate-600">Spend less time chasing reviews across sites and more time understanding what customers are telling you.</p></div>
+          <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">{features.map((feature) => <article key={feature.number} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-md"><p className="text-sm font-black text-brand">{feature.number}</p><h3 className="mt-5 text-lg font-bold text-slate-900">{feature.title}</h3><p className="mt-3 text-sm leading-6 text-slate-600">{feature.description}</p></article>)}</div>
+        </div>
+      </section>
+
+      <section id="how-it-works" className="bg-slate-50 py-20 md:py-24">
+        <div className="mx-auto max-w-7xl px-6">
+          <div className="mx-auto max-w-2xl text-center"><p className="text-sm font-bold uppercase tracking-[.18em] text-brand">Simple setup</p><h2 className="mt-3 text-3xl font-black tracking-tight text-slate-900 md:text-4xl">A clearer workflow from day one.</h2></div>
+          <div className="mt-12 grid gap-6 md:grid-cols-3">{steps.map((step, index) => <article key={step.title} className="rounded-2xl border border-slate-200 bg-white p-7"><div className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-dark text-sm font-black text-white">{index + 1}</div><h3 className="mt-5 text-xl font-bold text-slate-900">{step.title}</h3><p className="mt-3 leading-7 text-slate-600">{step.description}</p></article>)}</div>
+        </div>
+      </section>
+
       <section className="py-20">
-        <div className="mx-auto max-w-4xl px-6">
-          <h2 className="mb-12 text-center text-4xl font-bold">
-            Why We&apos;re Not Podium or Birdeye
-          </h2>
-          <div className="grid gap-4">
-            <Contrast row="Contract" us="Month-to-month" them="12-month lock-in" />
-            <Contrast row="Cancel" us="One click" them="30-90 day notice window" />
-            <Contrast row="Pricing" us="$297 flat, published" them="$399-$999 + hidden add-ons" />
-            <Contrast row="Renewal price hike" us="Never" them="8% annually" />
-            <Contrast row="Data export" us="One-click CSV" them="Locked in their platform" />
-            <Contrast row="Support" us="US-based, published phone" them="Offshore, no phone" />
-            <Contrast row="AI review response" us="Included" them="$99/mo add-on" />
-          </div>
-        </div>
+        <div className="mx-auto max-w-5xl px-6"><div className="rounded-3xl bg-brand-dark px-7 py-12 text-center text-white md:px-16 md:py-16"><p className="text-sm font-bold uppercase tracking-[.18em] text-teal-200">Make every customer voice easier to hear</p><h2 className="mx-auto mt-4 max-w-3xl text-3xl font-black md:text-4xl">Bring your local reputation into focus.</h2><p className="mx-auto mt-4 max-w-2xl leading-7 text-slate-200">Start with your business details and review links. Configure messaging and integrations only when your accounts and consent requirements are ready.</p><a href="/onboarding" className="mt-8 inline-flex rounded-xl bg-white px-7 py-4 font-bold text-brand-dark hover:bg-teal-50">Get started <span className="ml-2" aria-hidden="true">→</span></a></div></div>
       </section>
 
-      {/* CTA */}
-      <section className="bg-slate-50 py-20 text-center">
-        <div className="mx-auto max-w-2xl px-6">
-          <h2 className="mb-4 text-4xl font-bold">Ready to catch up to your competitors?</h2>
-          <p className="mb-8 text-lg text-slate-600">
-            15 minutes on Zoom. See the audit for your business. Decide.
-          </p>
-          <a
-            href="https://calendly.com/review-engine/demo"
-            className="inline-block rounded-lg bg-brand-dark px-8 py-4 font-bold text-white shadow-lg transition hover:bg-brand"
-          >
-            Book a Demo
-          </a>
-        </div>
-      </section>
-
-      <footer className="border-t border-slate-200 py-8 text-center text-sm text-slate-500">
-        Review Engine — Google Reviews for local businesses. © 2026.
-      </footer>
+      <footer className="border-t border-slate-200 py-8"><div className="mx-auto flex max-w-7xl flex-col gap-3 px-6 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between"><p>© {new Date().getFullYear()} Ricoiz. Local business reputation management.</p><div className="flex gap-5"><a href="/dashboard" className="hover:text-brand-dark">Dashboard</a><a href="/onboarding" className="hover:text-brand-dark">Onboarding</a></div></div></footer>
     </main>
-  );
-}
-
-function Step({ n, title, body }) {
-  return (
-    <div className="rounded-xl border border-slate-200 p-6">
-      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-brand text-lg font-bold text-white">
-        {n}
-      </div>
-      <h3 className="mb-2 text-xl font-bold text-slate-900">{title}</h3>
-      <p className="text-slate-600">{body}</p>
-    </div>
-  );
-}
-
-function Contrast({ row, us, them }) {
-  return (
-    <div className="grid grid-cols-3 gap-4 rounded-lg border border-slate-200 p-4">
-      <div className="font-semibold text-slate-800">{row}</div>
-      <div className="text-green-700">✓ {us}</div>
-      <div className="text-red-600">✗ {them}</div>
-    </div>
   );
 }
