@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL || "https://YOUR_CONVEX_DEPLOYMENT";
+const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL || "";
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
@@ -32,7 +32,7 @@ export default function OnboardingPage() {
     csvUrl: "",
   });
 
-  const submit = async () => {
+  const submit = async () => {\n    if (!CONVEX_URL) {\n      setError("Onboarding is not connected yet. Configure NEXT_PUBLIC_CONVEX_URL for your Convex deployment before submitting.");\n      return;\n    }
     setSubmitting(true);
     setError(null);
     try {
@@ -43,13 +43,13 @@ export default function OnboardingPage() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        setError(data.error || "Submission failed. Please try again or email onboarding@review-engine.co");
+        setError(data.error || "Submission failed. Please review your details and try again.");
         setSubmitting(false);
         return;
       }
       setSubmitted(true);
     } catch (e) {
-      setError("Network error. Please try again or email onboarding@review-engine.co");
+      setError("We could not reach the onboarding service. Check your connection and try again.");
       setSubmitting(false);
     }
   };
@@ -59,13 +59,13 @@ export default function OnboardingPage() {
       <main className="mx-auto max-w-3xl px-6 py-16 text-center">
         <div className="rounded-2xl border border-slate-200 bg-white p-12 shadow-sm">
           <div className="mb-4 text-5xl">✅</div>
-          <h1 className="mb-4 text-3xl font-bold text-slate-900">You&apos;re In!</h1>
+          <h1 className="mb-4 text-3xl font-bold text-slate-900">Your workspace request is in</h1>
           <p className="mb-6 text-lg text-slate-700">
             We received your onboarding info. Our team will set up your account
             within 24 hours and text you the confirmation.
           </p>
           <p className="text-sm text-slate-500">
-            Questions? Email onboarding@review-engine.co
+            Questions? Email your Ricoiz onboarding contact
           </p>
         </div>
       </main>
@@ -77,39 +77,39 @@ export default function OnboardingPage() {
       <p className="mb-2 text-sm font-medium uppercase tracking-widest text-brand">
         Onboarding — Step {step} of 4
       </p>
-      <h1 className="mb-8 text-3xl font-bold">Let&apos;s get you set up</h1>
+      <h1 className="mb-8 text-3xl font-bold">Set up your Ricoiz workspace</h1>
 
       {step === 1 && (
-        <Section title="Business Info">
+        <Section title="Business details">
           <Input label="Business Name" value={form.businessName} onChange={(v) => setForm({ ...form, businessName: v })} />
           <div className="grid gap-4 md:grid-cols-2">
-            <Input label="Owner First Name" value={form.ownerFirstName} onChange={(v) => setForm({ ...form, ownerFirstName: v })} />
-            <Input label="Owner Last Name" value={form.ownerLastName} onChange={(v) => setForm({ ...form, ownerLastName: v })} />
+            <Input label="Contact first name" value={form.ownerFirstName} onChange={(v) => setForm({ ...form, ownerFirstName: v })} />
+            <Input label="Contact last name" value={form.ownerLastName} onChange={(v) => setForm({ ...form, ownerLastName: v })} />
           </div>
-          <Input label="Owner Email" type="email" value={form.ownerEmail} onChange={(v) => setForm({ ...form, ownerEmail: v })} />
-          <Input label="Owner Phone" type="tel" value={form.ownerPhone} onChange={(v) => setForm({ ...form, ownerPhone: v })} help="For urgent issues + shown in AI responses to low-rating reviews" />
+          <Input label="Work email" type="email" value={form.ownerEmail} onChange={(v) => setForm({ ...form, ownerEmail: v })} />
+          <Input label="Business phone" type="tel" value={form.ownerPhone} onChange={(v) => setForm({ ...form, ownerPhone: v })} help="Used for workspace coordination and support" />
           <Input label="City" value={form.city} onChange={(v) => setForm({ ...form, city: v })} />
           <NextBtn onClick={() => setStep(2)}>Continue</NextBtn>
         </Section>
       )}
 
       {step === 2 && (
-        <Section title="Google Business Profile">
-          <Input label="Google Review URL" value={form.googleReviewUrl} onChange={(v) => setForm({ ...form, googleReviewUrl: v })} help='Format: https://g.page/r/YOUR-ID/review' />
+        <Section title="Review platforms">
+          <Input label="Google review link" value={form.googleReviewUrl} onChange={(v) => setForm({ ...form, googleReviewUrl: v })} help='Format: https://g.page/r/YOUR-ID/review' />
           <div className="rounded-lg border border-brand bg-brand/5 p-6">
-            <h3 className="mb-3 font-bold text-brand-dark">Add us as a Google Business Profile Manager</h3>
-            <p className="mb-3 text-slate-700">This lets us respond to reviews on your behalf. Standard agency practice.</p>
+            <h3 className="mb-3 font-bold text-brand-dark">Connect your Google Business Profile</h3>
+            <p className="mb-3 text-slate-700">Authorize required account access only through official platform settings. Never share your password.</p>
             <ol className="ml-6 list-decimal space-y-2 text-slate-700">
               <li>Go to business.google.com</li>
               <li>Select your business</li>
               <li>Click <strong>Users</strong> (three-dot menu)</li>
               <li>Click <strong>Add user</strong></li>
-              <li>Email: <code className="rounded bg-slate-100 px-2 py-1 text-sm">reviews@review-engine.co</code></li>
+              <li>Email: <code className="rounded bg-slate-100 px-2 py-1 text-sm">the authorized Ricoiz team account provided during setup</code></li>
               <li>Role: <strong>Manager</strong></li>
               <li>Click <strong>Invite</strong></li>
             </ol>
             <p className="mt-4 text-sm text-slate-600">
-              <strong>Note:</strong> Google requires a 7-day verification period. Your AI review responses will activate on Day 8. Reactivation SMS campaign starts within 24 hours regardless.
+              <strong>Note:</strong> Platform access and review-response features depend on account permissions and verification. No messages are sent until workflows are configured and tested.
             </p>
           </div>
           <BackNextBtn onBack={() => setStep(1)} onNext={() => setStep(3)}>Continue</BackNextBtn>
@@ -120,7 +120,7 @@ export default function OnboardingPage() {
         <Section title="Consent Attestation (Required)">
           <p className="mb-4 text-slate-700">
             To send SMS to your customer list, we need you to attest to how you collected their consent.
-            This is a legal requirement (TCPA) that shifts liability in the event of any dispute.
+            Only include customers with documented permission for the specific messages you plan to send. This form is an operational record, not legal advice.
           </p>
           <label className="mb-3 block">
             <span className="mb-2 block font-semibold">1. How did you obtain consent from your customers?</span>
@@ -146,7 +146,7 @@ export default function OnboardingPage() {
               voluntary: "All customers provided their phone number voluntarily",
               pewc: "I have express written consent to send them SMS communications",
               notEBR: "I understand consent basis is PEWC (Prior Express Written Consent), not EBR",
-              indemnify: "I indemnify Review Engine against TCPA violations arising from this list",
+              indemnify: "I confirm these records are accurate and I am authorized to submit them for review",
             }).map(([key, label]) => (
               <label key={key} className="flex items-start gap-2">
                 <input
@@ -165,13 +165,13 @@ export default function OnboardingPage() {
       )}
 
       {step === 4 && (
-        <Section title="Upload Past Customer List">
+        <Section title="Customer list and consent">
           <p className="text-slate-700">
             Upload a CSV of your past 12 months of customers (name + phone).
             We&apos;ll drip 2-3 review requests every 20 minutes during business hours, capped at 50/day per your account.
           </p>
           <div className="rounded-lg border-2 border-dashed border-slate-300 p-8 text-center">
-            <p className="text-slate-500">CSV upload — wire to file storage</p>
+            <p className="text-slate-500">CSV selection only — secure upload must be configured before data is transmitted</p>
             <input type="file" accept=".csv" className="mt-4" />
           </div>
           <p className="text-sm text-slate-600">
