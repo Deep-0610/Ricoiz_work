@@ -1,7 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query, internalMutation } from "./_generated/server";
-
-export const submit = mutation({
+import { mutation, query } from "./_generated/server";
+const submit = mutation({
   args: {
     businessName: v.string(),
     ownerFirstName: v.string(),
@@ -19,77 +18,73 @@ export const submit = mutation({
       voluntary: v.boolean(),
       pewc: v.boolean(),
       notEBR: v.boolean(),
-      indemnify: v.boolean(),
+      indemnify: v.boolean()
     }),
     signature: v.string(),
-    csvUrl: v.optional(v.string()),
+    csvUrl: v.optional(v.string())
   },
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("pendingOnboardings", {
       ...args,
       status: "new",
-      submittedAt: Date.now(),
+      submittedAt: Date.now()
     });
     return { ok: true, id };
-  },
+  }
 });
-
-export const listPending = query({
+const listPending = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db
-      .query("pendingOnboardings")
-      .withIndex("by_status", (q) => q.eq("status", "new"))
-      .order("desc")
-      .take(50);
-  },
+    return await ctx.db.query("pendingOnboardings").withIndex("by_status", (q) => q.eq("status", "new")).order("desc").take(50);
+  }
 });
-
-export const listAll = query({
+const listAll = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, { limit }) => {
-    return await ctx.db
-      .query("pendingOnboardings")
-      .order("desc")
-      .take(limit ?? 100);
-  },
+    return await ctx.db.query("pendingOnboardings").order("desc").take(limit ?? 100);
+  }
 });
-
-export const getById = query({
+const getById = query({
   args: { id: v.id("pendingOnboardings") },
   handler: async (ctx, { id }) => {
     return await ctx.db.get(id);
-  },
+  }
 });
-
-export const markProcessed = mutation({
+const markProcessed = mutation({
   args: {
     id: v.id("pendingOnboardings"),
     clientId: v.id("reviewClients"),
-    notes: v.optional(v.string()),
+    notes: v.optional(v.string())
   },
   handler: async (ctx, { id, clientId, notes }) => {
     await ctx.db.patch(id, {
       status: "processed",
       processedAt: Date.now(),
       processedClientId: clientId,
-      notes,
+      notes
     });
     return { ok: true };
-  },
+  }
 });
-
-export const markRejected = mutation({
+const markRejected = mutation({
   args: {
     id: v.id("pendingOnboardings"),
-    notes: v.string(),
+    notes: v.string()
   },
   handler: async (ctx, { id, notes }) => {
     await ctx.db.patch(id, {
       status: "rejected",
       processedAt: Date.now(),
-      notes,
+      notes
     });
     return { ok: true };
-  },
+  }
 });
+export {
+  getById,
+  listAll,
+  listPending,
+  markProcessed,
+  markRejected,
+  submit
+};
