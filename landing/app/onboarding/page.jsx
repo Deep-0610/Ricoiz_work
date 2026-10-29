@@ -32,7 +32,11 @@ export default function OnboardingPage() {
     csvUrl: "",
   });
 
-  const submit = async () => {\n    if (!CONVEX_URL) {\n      setError("Onboarding is not connected yet. Configure NEXT_PUBLIC_CONVEX_URL for your Convex deployment before submitting.");\n      return;\n    }
+  const submit = async () => {
+    if (!CONVEX_URL) {
+      setError("Onboarding is not connected yet. Configure NEXT_PUBLIC_CONVEX_URL for your Convex deployment before submitting.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -61,8 +65,7 @@ export default function OnboardingPage() {
           <div className="mb-4 text-5xl">✅</div>
           <h1 className="mb-4 text-3xl font-bold text-slate-900">Your workspace request is in</h1>
           <p className="mb-6 text-lg text-slate-700">
-            We received your onboarding info. Our team will set up your account
-            within 24 hours and text you the confirmation.
+            Our team has received your details. Review sources and messaging workflows will be enabled after access and consent checks are complete.
           </p>
           <p className="text-sm text-slate-500">
             Questions? Email your Ricoiz onboarding contact
@@ -167,15 +170,14 @@ export default function OnboardingPage() {
       {step === 4 && (
         <Section title="Customer list and consent">
           <p className="text-slate-700">
-            Upload a CSV of your past 12 months of customers (name + phone).
-            We&apos;ll drip 2-3 review requests every 20 minutes during business hours, capped at 50/day per your account.
+            Provide customer records only if you have the required permission for the intended SMS communications. Sending limits and timing must be reviewed and configured before any campaign is activated.
           </p>
           <div className="rounded-lg border-2 border-dashed border-slate-300 p-8 text-center">
             <p className="text-slate-500">CSV selection only — secure upload must be configured before data is transmitted</p>
             <input type="file" accept=".csv" className="mt-4" />
           </div>
           <p className="text-sm text-slate-600">
-            <strong>Or</strong> email your CSV to <code>onboarding@review-engine.co</code> and we&apos;ll upload it for you within 24 hours.
+            <strong>Or</strong> share your CSV only through a secure, approved upload method after it is configured.
           </p>
           {error && (
             <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-700">
