@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { timingSafeEqual } from "node:crypto";
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
@@ -146,6 +147,70 @@ app.patch("/api/campaigns/:id/status", auth, asyncHandler(async (req, res) => {
   res.json({ item, message: "Status saved. No real SMS is sent by this demo API." });
 }));
 
+
+
+const n8nAutomationAuth = (req, res, next) => {
+  const expected = process.env.RICOIZ_N8N_API_KEY || "";
+  const supplied = String(req.get("x-ricoiz-automation-key") || "");
+  if (expected.length < 32) return res.status(503).json({ error: "Automation API is not configured" });
+  const expectedBuffer = Buffer.from(expected);
+  const suppliedBuffer = Buffer.from(supplied);
+  if (expectedBuffer.length !== suppliedBuffer.length || !timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+    return res.status(401).json({ error: "Invalid automation credentials" });
+  }
+  next();
+};
+const normalizePhone = value => {
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/\\D/g, "");
+  if (raw.startsWith("+") && digits.length >= 8 && digits.length <= 15) return `+${digits}`;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return null;
+};
+
+// n8n intake integration. These endpoints use a dedicated API key and never expose
+// customer records to an unauthenticated webhook caller.
+app.get("/api/automation/reviews/client-by-intake-phone", n8nAutomationAuth, asyncHandler(async (req, res) => {
+  const intakePhone = normalizePhone(req.query.intakePhone);
+  if (!intakePhone) return res.status(400).json({ error: "A valid intake phone number is required" });
+  const client = await Client.findOne({ intakePhone, status: { $ne: "paused" } }).select("_id businessName status").lean();
+  if (!client) return res.status(404).json({ clientId: null, error: "No active Ricoiz workspace is assigned to this intake number" });
+  res.json({ clientId: String(client._id), businessName: client.businessName, status: client.status });
+}));
+
+app.get("/api/automation/reviews/opt-out-check", n8nAutomationAuth, asyncHandler(async (req, res) => {
+  const phone = normalizePhone(req.query.phone);
+  if (!phone) return res.status(400).json({ error: "A valid phone number is required" });
+  const optedOut = Boolean(await Customer.exists({ phone, $or: [{ consentStatus: "revoked" }, { optedOutAt: { $ne: null } }] }));
+  res.json({ phone, optedOut });
+}));
+
+app.post("/api/automation/reviews/customer-add-via-text", n8nAutomationAuth, asyncHandler(async (req, res) => {
+  const parsed = z.object({
+    clientId: z.string().refine(value => mongoose.isValidObjectId(value)),
+    firstName: z.string().trim().min(1).max(80),
+    phone: z.string().trim().min(7).max(25),
+    intakedFromOwnerPhone: z.string().trim().max(25).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: "Invalid customer intake payload" });
+  const phone = normalizePhone(parsed.data.phone);
+  if (!phone) return res.status(400).json({ ok: false, error: "Customer phone number is invalid" });
+  const client = await Client.findOne({ _id: parsed.data.clientId, status: { $ne: "paused" } }).select("_id").lean();
+  if (!client) return res.status(404).json({ ok: false, error: "Ricoiz workspace not found or paused" });
+  const optedOut = await Customer.exists({ phone, $or: [{ consentStatus: "revoked" }, { optedOutAt: { $ne: null } }] });
+  if (optedOut) return res.json({ ok: false, reason: "opted_out" });
+  const existing = await Customer.findOne({ clientId: client._id, phone }).select("_id").lean();
+  if (existing) return res.json({ ok: false, reason: "duplicate", customerId: String(existing._id) });
+  const customer = await Customer.create({
+    clientId: client._id,
+    firstName: parsed.data.firstName,
+    phone,
+    consentStatus: "unknown",
+    tags: ["owner-intake", "consent-pending"]
+  });
+  res.status(201).json({ ok: true, customerId: String(customer._id), consentStatus: customer.consentStatus, dripEligible: false, message: "Customer saved. SMS remains blocked until documented consent is recorded." });
+}));
 
 app.get("/api/integrations/google-business-profile/connect", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
