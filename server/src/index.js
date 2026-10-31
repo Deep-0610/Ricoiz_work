@@ -147,7 +147,7 @@ app.delete("/api/customers/:id", auth, asyncHandler(async (req, res) => {
 
 app.get("/api/reviews", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
-  const items = await Review.find({ clientId }).sort({ reviewedAt: -1 }).limit(100).lean(); const page = Math.max(1, Number(req.query.page || 1));
+  const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
   const [items, total] = await Promise.all([
     Review.find({ clientId }).sort({ reviewedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
@@ -273,7 +273,7 @@ app.get("/api/integrations/google-business-profile/connect", auth, asyncHandler(
 }));
 app.get("/api/integrations/google-business-profile/callback", asyncHandler(async (req, res) => {
   const frontend = allowedOrigins[0] || "http://localhost:3000";
-  if (req.query.error) return res.redirect(`${frontend}/settings/integrations?google=denied`);
+  if (req.query.error) return res.redirect(`${frontend}/dashboard/settings?google=denied`);
   const parsed = z.object({ code: z.string().min(1), state: z.string().min(1) }).safeParse(req.query);
   if (!parsed.success) return res.status(400).send("Invalid Google OAuth callback");
   let state;
@@ -294,7 +294,7 @@ app.get("/api/integrations/google-business-profile/callback", asyncHandler(async
     } },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
-  res.redirect(`${frontend}/settings/integrations?google=connected`);
+  res.redirect(`${frontend}/dashboard/settings?google=connected`);
 }));
 app.get("/api/integrations/google-business-profile/accounts", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
