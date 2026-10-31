@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import bcrypt from "bcryptjs";
@@ -18,6 +19,7 @@ app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); callback(new Error("Origin not allowed")); }, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
+app.use(cookieParser());
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: "draft-7", legacyHeaders: false }));
 
 const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -48,10 +50,10 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Valid email and password are required" });
   const user = await User.findOne({ email: parsed.data.email.toLowerCase() }).select("+passwordHash");
   if (!user || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) return res.status(401).json({ error: "Email or password is incorrect" });
-  res.json({ token: tokenFor(user), user: { id: user._id, name: user.name, email: user.email, role: user.role, clientId: user.clientId } });
+  res.cookie("ricoiz_session", tokenFor(user), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });\n  res.json({ user: { id: user._id, name: user.name, email: user.email, role: user.role, clientId: user.clientId } });
 }));
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
-app.post("/api/auth/logout", auth, (_req, res) => res.json({ ok: true, message: "Clear the client-side bearer token to end this session" }));
+app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
 
 app.post("/api/onboarding", asyncHandler(async (req, res) => {
   const schema = z.object({
