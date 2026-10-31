@@ -8,7 +8,8 @@ import rateLimit from "express-rate-limit";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
-import { User, Client, Customer, Review, Campaign, SmsActivity, Onboarding } from "./models.js";
+import { User, Client, Customer, Review, Campaign, SmsActivity, Onboarding, IntegrationConnection } from "./models.js";
+import { googleAuthorizationUrl, exchangeGoogleCode, encryptToken, googleUserInfo, googleAccessToken, listGoogleAccounts, listGoogleLocations, listGoogleReviews, publishGoogleReviewReply } from "./googleBusinessProfile.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
@@ -51,6 +52,7 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
   const user = await User.findOne({ email: parsed.data.email.toLowerCase() }).select("+passwordHash");
   if (!user || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) return res.status(401).json({ error: "Email or password is incorrect" });
   res.cookie("ricoiz_session", tokenFor(user), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
+  return res.json({ ok: true, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
 }));
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
 app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
@@ -144,22 +146,118 @@ app.patch("/api/campaigns/:id/status", auth, asyncHandler(async (req, res) => {
   res.json({ item, message: "Status saved. No real SMS is sent by this demo API." });
 }));
 
-app.get("/api/integrations/status", auth, (_req, res) => res.json({
+
+app.get("/api/integrations/google-business-profile/connect", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const state = jwt.sign({ sub: req.user._id.toString(), clientId }, process.env.JWT_SECRET, { expiresIn: "10m", audience: "google-business-profile-oauth" });
+  res.json({ authorizationUrl: googleAuthorizationUrl(state) });
+}));
+app.get("/api/integrations/google-business-profile/callback", asyncHandler(async (req, res) => {
+  const frontend = allowedOrigins[0] || "http://localhost:3000";
+  if (req.query.error) return res.redirect(`${frontend}/settings/integrations?google=denied`);
+  const parsed = z.object({ code: z.string().min(1), state: z.string().min(1) }).safeParse(req.query);
+  if (!parsed.success) return res.status(400).send("Invalid Google OAuth callback");
+  let state;
+  try { state = jwt.verify(parsed.data.state, process.env.JWT_SECRET, { audience: "google-business-profile-oauth" }); }
+  catch { return res.status(400).send("Google OAuth state is invalid or expired"); }
+  const token = await exchangeGoogleCode(parsed.data.code);
+  const googleUser = await googleUserInfo(token.access_token);
+  const connection = await IntegrationConnection.findOneAndUpdate(
+    { clientId: state.clientId, provider: "google-business-profile" },
+    { $set: {
+      status: "connected",
+      accessTokenEncrypted: encryptToken(token.access_token),
+      ...(token.refresh_token ? { refreshTokenEncrypted: encryptToken(token.refresh_token) } : {}),
+      tokenExpiresAt: new Date(Date.now() + (token.expires_in || 3600) * 1000),
+      scopes: String(token.scope || "").split(" "),
+      externalAccountEmail: googleUser.email || "",
+      connectedAt: new Date()
+    } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  res.redirect(`${frontend}/settings/integrations?google=connected`);
+}));
+app.get("/api/integrations/google-business-profile/accounts", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const connection = await IntegrationConnection.findOne({ clientId, provider: "google-business-profile", status: "connected" });
+  if (!connection) return res.status(404).json({ error: "Google Business Profile is not connected" });
+  const accessToken = await googleAccessToken(connection, doc => doc.save());
+  res.json(await listGoogleAccounts(accessToken));
+}));
+app.get("/api/integrations/google-business-profile/locations", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const account = String(req.query.account || "");
+  if (!/^accounts\/[A-Za-z0-9_-]+$/.test(account)) return res.status(400).json({ error: "A valid Google account resource name is required" });
+  const connection = await IntegrationConnection.findOne({ clientId, provider: "google-business-profile", status: "connected" });
+  if (!connection) return res.status(404).json({ error: "Google Business Profile is not connected" });
+  const accessToken = await googleAccessToken(connection, doc => doc.save());
+  res.json(await listGoogleLocations(accessToken, account));
+}));
+app.post("/api/integrations/google-business-profile/location", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const parsed = z.object({ accountName: z.string().regex(/^accounts\/[A-Za-z0-9_-]+$/), locationName: z.string().regex(/^accounts\/[A-Za-z0-9_-]+\/locations\/[A-Za-z0-9_-]+$/), locationTitle: z.string().trim().min(1).max(200) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Valid Google account and location are required" });
+  const connection = await IntegrationConnection.findOneAndUpdate({ clientId, provider: "google-business-profile" }, { $set: { externalAccountName: parsed.data.accountName, locationName: parsed.data.locationName, locationTitle: parsed.data.locationTitle } }, { new: true });
+  if (!connection) return res.status(404).json({ error: "Google Business Profile is not connected" });
+  res.json({ ok: true, locationName: connection.locationName, locationTitle: connection.locationTitle });
+}));
+app.post("/api/integrations/google-business-profile/sync-reviews", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const connection = await IntegrationConnection.findOne({ clientId, provider: "google-business-profile", status: "connected" });
+  if (!connection?.locationName) return res.status(409).json({ error: "Connect Google and select a verified business location first" });
+  const accessToken = await googleAccessToken(connection, doc => doc.save());
+  let pageToken; let synced = 0; let pages = 0;
+  do {
+    const data = await listGoogleReviews(accessToken, connection.locationName, pageToken);
+    for (const review of data.reviews || []) {
+      const ratingMap = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
+      const rating = ratingMap[review.starRating] || Number(review.starRating) || 0;
+      if (!rating) continue;
+      await Review.findOneAndUpdate(
+        { clientId, externalId: review.reviewId, platform: "google" },
+        { $set: { rating, author: review.reviewer?.displayName || "Google user", text: review.comment || "", response: review.reviewReply?.comment || "", responseStatus: review.reviewReply?.comment ? "published" : "not_started", reviewedAt: review.createTime ? new Date(review.createTime) : new Date(), demo: false } },
+        { upsert: true, new: true }
+      );
+      synced++;
+    }
+    pageToken = data.nextPageToken; pages++;
+  } while (pageToken && pages < 10);
+  res.json({ ok: true, synced, pages, hasMore: Boolean(pageToken) });
+}));
+app.put("/api/integrations/google-business-profile/reviews/:reviewId/reply", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const parsed = z.object({ response: z.string().trim().min(1).max(4096) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A review response is required" });
+  const connection = await IntegrationConnection.findOne({ clientId, provider: "google-business-profile", status: "connected" });
+  if (!connection?.locationName) return res.status(409).json({ error: "Google business location is not selected" });
+  const review = await Review.findOne({ _id: req.params.reviewId, clientId, platform: "google" });
+  if (!review?.externalId) return res.status(404).json({ error: "Google review not found" });
+  const accessToken = await googleAccessToken(connection, doc => doc.save());
+  const resourceName = `${connection.locationName}/reviews/${review.externalId}`;
+  const result = await publishGoogleReviewReply(accessToken, resourceName, parsed.data.response);
+  review.response = parsed.data.response; review.responseStatus = "published"; await review.save();
+  res.json({ ok: true, review, google: result });
+}));
+
+app.get("/api/integrations/status", auth, asyncHandler(async (req, res) => {
+  const connection = await IntegrationConnection.findOne({ clientId: req.user.clientId, provider: "google-business-profile" }).lean();
+  res.json({
   integrations: [
     { key: "mongodb", name: "MongoDB", status: mongoose.connection.readyState === 1 ? "connected" : "disconnected" },
-    { key: "google-business-profile", name: "Google Business Profile", status: "not_connected" },
+    { key: "google-business-profile", name: "Google Business Profile", status: connection?.status || "not_connected", accountEmail: connection?.externalAccountEmail || null, location: connection?.locationTitle || null },
     { key: "close-crm", name: "Close CRM", status: "demo_only" },
     { key: "n8n", name: "n8n automation", status: "demo_only" },
     { key: "stripe", name: "Stripe billing", status: "not_connected" },
     { key: "ai", name: "AI responses", status: "demo_only" }
   ],
   demo: DEMO_MODE
+  });
 }));
 
 app.use((err, _req, res, _next) => {
   if (err?.code === 11000) return res.status(409).json({ error: "A record with these details already exists" });
   console.error(err);
-  res.status(500).json({ error: "Internal server error" });
+  res.status(err?.status && Number.isInteger(err.status) ? err.status : 500).json({ error: err?.status ? err.message : "Internal server error" });
 });
 
 async function start() {
