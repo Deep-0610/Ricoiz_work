@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL || "";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
@@ -40,7 +40,7 @@ export default function OnboardingPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`${CONVEX_URL}/reviews/onboarding-submit`, {
+      const res = await fetch(`${API_URL}/api/onboarding`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
