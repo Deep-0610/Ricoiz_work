@@ -55,6 +55,35 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
   res.cookie("ricoiz_session", tokenFor(user), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
   return res.json({ ok: true, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
 }));
+app.post("/api/auth/register", asyncHandler(async (req, res) => {
+  const parsed = z.object({
+    name: z.string().trim().min(2).max(100),
+    email: z.string().trim().email().max(254),
+    password: z.string().min(12).max(128),
+    businessName: z.string().trim().min(2).max(120),
+    city: z.string().trim().max(100).optional()
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter a valid name, email, business name, and password (at least 12 characters)." });
+  const email = parsed.data.email.toLowerCase();
+  if (await User.exists({ email })) return res.status(409).json({ error: "An account with this email already exists. Please sign in." });
+  const client = await Client.create({
+    businessName: parsed.data.businessName,
+    ownerName: parsed.data.name,
+    ownerEmail: email,
+    city: parsed.data.city || "",
+    status: "pending",
+    demo: false
+  });
+  try {
+    const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+    const user = await User.create({ name: parsed.data.name, email, passwordHash, role: "owner", clientId: client._id });
+    res.cookie("ricoiz_session", tokenFor(user), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
+    return res.status(201).json({ ok: true, user: { id: user._id, name: user.name, email: user.email } });
+  } catch (error) {
+    await Client.deleteOne({ _id: client._id });
+    throw error;
+  }
+}));
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
 app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
 
