@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API_URL = "";
 
 export default function SettingsPage() {
   const [intakePhone,setIntakePhone]=useState("");
@@ -33,7 +33,7 @@ export default function SettingsPage() {
     </form>
     <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6">
       <h2 className="font-bold">External integrations</h2>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b py-3"><div><p className="font-semibold">Google Business Profile</p><p className="text-sm text-slate-500">OAuth credentials and Google API access approval required.</p></div><a className="rounded-lg border px-4 py-2 text-sm font-semibold" href={`${API_URL}/api/integrations/google-business-profile/connect`}>Connect Google</a></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b py-3"><div><p className="font-semibold">Google Business Profile</p><p className="text-sm text-slate-500">OAuth credentials and Google API access approval required.</p></div><a className="rounded-lg border px-4 py-2 text-sm font-semibold" href="/settings/integrations">Connect Google</a></div>
       <div className="border-b py-3"><p className="font-semibold">n8n automation</p><p className="text-sm text-slate-500">Import the first intake workflow and configure its Header Auth credential in your n8n editor.</p></div>
       <div className="border-b py-3"><p className="font-semibold">Close CRM / SMS</p><p className="text-sm text-slate-500">Close API credentials and approved sender configuration are not connected yet.</p></div>
       <div className="py-3"><p className="font-semibold">Stripe billing</p><p className="text-sm text-slate-500">Payment checkout and webhook activation require your Stripe account credentials.</p></div>
