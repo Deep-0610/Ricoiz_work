@@ -25,7 +25,7 @@ app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeader
 const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const tokenFor = user => jwt.sign({ sub: user._id.toString(), role: user.role, clientId: user.clientId?.toString() || null }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || "7d" });
 const auth = asyncHandler(async (req, res, next) => {
-  const token = req.cookies?.ricoiz_session || (req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
+  const token = req.cookies?.ricoiz_session || (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
   if (!token) return res.status(401).json({ error: "Authentication required" });
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
