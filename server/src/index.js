@@ -25,7 +25,7 @@ app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeader
 const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const tokenFor = user => jwt.sign({ sub: user._id.toString(), role: user.role, clientId: user.clientId?.toString() || null }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || "7d" });
 const auth = asyncHandler(async (req, res, next) => {
-  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const token = req.cookies?.ricoiz_session || (req.headers.authorization || "").replace(/^Bearer\\s+/i, "");
   if (!token) return res.status(401).json({ error: "Authentication required" });
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
@@ -50,7 +50,7 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: "Valid email and password are required" });
   const user = await User.findOne({ email: parsed.data.email.toLowerCase() }).select("+passwordHash");
   if (!user || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) return res.status(401).json({ error: "Email or password is incorrect" });
-  res.cookie("ricoiz_session", tokenFor(user), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });\n  res.json({ user: { id: user._id, name: user.name, email: user.email, role: user.role, clientId: user.clientId } });
+  res.cookie("ricoiz_session", tokenFor(user), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
 }));
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
 app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
