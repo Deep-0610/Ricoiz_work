@@ -98,4 +98,22 @@ export const Customer = models.Customer || model("Customer", customerSchema);
 export const Review = models.Review || model("Review", reviewSchema);
 export const Campaign = models.Campaign || model("Campaign", campaignSchema);
 export const SmsActivity = models.SmsActivity || model("SmsActivity", smsActivitySchema);
+const integrationConnectionSchema = new Schema({
+  clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true, index: true },
+  provider: { type: String, required: true, enum: ["google-business-profile", "close-crm", "n8n", "stripe", "ai"] },
+  status: { type: String, enum: ["connected", "reauth_required", "disconnected"], default: "disconnected" },
+  accessTokenEncrypted: String,
+  refreshTokenEncrypted: String,
+  tokenExpiresAt: Date,
+  scopes: [String],
+  externalAccountName: String,
+  externalAccountEmail: String,
+  locationName: String,
+  locationTitle: String,
+  connectedAt: Date,
+  metadata: { type: Schema.Types.Mixed, default: {} }
+}, opts);
+integrationConnectionSchema.index({ clientId: 1, provider: 1 }, { unique: true });
+
+export const IntegrationConnection = models.IntegrationConnection || model("IntegrationConnection", integrationConnectionSchema);
 export const Onboarding = models.Onboarding || model("Onboarding", onboardingSchema);
