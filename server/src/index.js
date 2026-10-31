@@ -39,7 +39,7 @@ const clientScope = req => req.user.clientId || req.query.clientId || req.body.c
 const requireClient = (req, res) => {
   const id = clientScope(req);
   if (!id || !mongoose.isValidObjectId(id)) { res.status(400).json({ error: "A valid workspace is required" }); return null; }
-  if (req.user.role !== "owner" && req.user.clientId?.toString() !== id) { res.status(403).json({ error: "Workspace access denied" }); return null; }
+  if (req.user.clientId?.toString() !== id) { res.status(403).json({ error: "Workspace access denied" }); return null; }
   return id;
 };
 
