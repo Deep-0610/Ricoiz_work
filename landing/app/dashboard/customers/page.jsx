@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API_URL = "";
 
 export default function CustomersPage() {
   const [items, setItems] = useState([]);
