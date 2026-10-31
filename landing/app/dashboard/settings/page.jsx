@@ -1,12 +1,42 @@
-const integrations = [
-  { name: "Google Business Profile", detail: "Business profile identity, review access, and response permissions.", status: "Connect account" },
-  { name: "Yelp", detail: "Business listing and any supported authorized review data access.", status: "Verify access" },
-  { name: "Facebook Pages", detail: "Page access and permissions for available reputation features.", status: "Connect account" },
-  { name: "Convex", detail: "Database, business records, review endpoints, and application state.", status: "Configure environment" },
-  { name: "n8n automation", detail: "Review-request sequences, inbound replies, opt-out checks, and scheduled follow-ups.", status: "Verify workflows" },
-  { name: "SMS compliance", detail: "Document consent, STOP handling, quiet hours, sender identity, and message templates.", status: "Required before sending" },
-];
+"use client";
+
+import { useEffect, useState } from "react";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 export default function SettingsPage() {
-  return <section className="mx-auto max-w-6xl"><p className="text-sm font-semibold uppercase tracking-widest text-brand">Workspace configuration</p><h1 className="mt-2 text-3xl font-bold text-slate-900">Platforms & settings</h1><p className="mt-2 max-w-3xl text-slate-600">Configure the review sources and messaging workflow that power your local business reputation hub. Availability depends on platform permissions and credentials.</p><div className="mt-8 space-y-4">{integrations.map((item) => <article key={item.name} className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white p-5 sm:flex-row sm:items-center"><div><h2 className="font-semibold text-slate-900">{item.name}</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">{item.detail}</p></div><span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">{item.status}</span></article>)}</div><p className="mt-6 text-xs leading-5 text-slate-500">A platform listed here is not necessarily connected. Confirm authorization and test data retrieval before relying on it in production.</p></section>;
+  const [intakePhone,setIntakePhone]=useState("");
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [message,setMessage]=useState("");
+  const [error,setError]=useState("");
+  useEffect(()=>{
+    fetch(`${API_URL}/api/settings/intake-phone`,{credentials:"include"})
+      .then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error||"Could not load settings");setIntakePhone(d.intakePhone||"");})
+      .catch(e=>setError(e.message)).finally(()=>setLoading(false));
+  },[]);
+  async function save(event){
+    event.preventDefault();setSaving(true);setError("");setMessage("");
+    try{
+      const r=await fetch(`${API_URL}/api/settings/intake-phone`,{method:"PATCH",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({intakePhone})});
+      const d=await r.json();if(!r.ok)throw new Error(d.error||"Could not save number");
+      setIntakePhone(d.intakePhone);setMessage("Intake phone saved for this workspace.");
+    }catch(e){setError(e.message);}finally{setSaving(false);}
+  }
+  return <section className="mx-auto max-w-6xl space-y-6">
+    <div><p className="text-sm font-semibold uppercase tracking-widest text-brand">Workspace configuration</p><h1 className="mt-2 text-3xl font-bold text-slate-900">Platforms & settings</h1><p className="mt-2 text-slate-600">Configure the inbound number used to identify your workspace in the first n8n intake workflow.</p></div>
+    <form onSubmit={save} className="max-w-2xl space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+      <div><h2 className="font-bold">Owner intake phone</h2><p className="mt-1 text-sm text-slate-500">Use the Close CRM number that receives owner-submitted customer details, in E.164 format.</p></div>
+      <input className="w-full rounded-lg border p-3" type="tel" placeholder="+14155550123" value={intakePhone} onChange={e=>setIntakePhone(e.target.value)} disabled={loading} required />
+      <button disabled={saving||loading} className="rounded-lg bg-brand-dark px-5 py-3 font-semibold text-white disabled:opacity-50">{saving?"Saving…":"Save intake number"}</button>
+      {message&&<p className="text-sm text-green-700">{message}</p>}{error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
+    </form>
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6">
+      <h2 className="font-bold">External integrations</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b py-3"><div><p className="font-semibold">Google Business Profile</p><p className="text-sm text-slate-500">OAuth credentials and Google API access approval required.</p></div><a className="rounded-lg border px-4 py-2 text-sm font-semibold" href={`${API_URL}/api/integrations/google-business-profile/connect`}>Connect Google</a></div>
+      <div className="border-b py-3"><p className="font-semibold">n8n automation</p><p className="text-sm text-slate-500">Import the first intake workflow and configure its Header Auth credential in your n8n editor.</p></div>
+      <div className="border-b py-3"><p className="font-semibold">Close CRM / SMS</p><p className="text-sm text-slate-500">Close API credentials and approved sender configuration are not connected yet.</p></div>
+      <div className="py-3"><p className="font-semibold">Stripe billing</p><p className="text-sm text-slate-500">Payment checkout and webhook activation require your Stripe account credentials.</p></div>
+    </div>
+  </section>;
 }
