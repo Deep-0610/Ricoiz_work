@@ -149,6 +149,18 @@ app.patch("/api/campaigns/:id/status", auth, asyncHandler(async (req, res) => {
 
 
 
+app.patch("/api/settings/intake-phone", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const parsed = z.object({ intakePhone: z.string().trim().min(7).max(25) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A valid Close inbound phone number is required" });
+  const intakePhone = normalizePhone(parsed.data.intakePhone);
+  if (!intakePhone) return res.status(400).json({ error: "Use an E.164 phone number, for example +14155550123" });
+  const assigned = await Client.findOne({ intakePhone, _id: { $ne: clientId } }).select("_id").lean();
+  if (assigned) return res.status(409).json({ error: "This intake phone number is already assigned to another workspace" });
+  await Client.updateOne({ _id: clientId }, { $set: { intakePhone } });
+  res.json({ ok: true, intakePhone });
+}));
+
 const n8nAutomationAuth = (req, res, next) => {
   const expected = process.env.RICOIZ_N8N_API_KEY || "";
   const supplied = String(req.get("x-ricoiz-automation-key") || "");
