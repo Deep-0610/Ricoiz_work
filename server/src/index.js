@@ -52,6 +52,7 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
   const user = await User.findOne({ email: parsed.data.email.toLowerCase() }).select("+passwordHash");
   if (!user || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) return res.status(401).json({ error: "Email or password is incorrect" });
   res.cookie("ricoiz_session", tokenFor(user), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
+  return res.json({ ok: true, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
 }));
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
 app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
@@ -256,7 +257,7 @@ app.get("/api/integrations/status", auth, asyncHandler(async (req, res) => {
 app.use((err, _req, res, _next) => {
   if (err?.code === 11000) return res.status(409).json({ error: "A record with these details already exists" });
   console.error(err);
-  res.status(500).json({ error: "Internal server error" });
+  res.status(err?.status && Number.isInteger(err.status) ? err.status : 500).json({ error: err?.status ? err.message : "Internal server error" });
 });
 
 async function start() {
