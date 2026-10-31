@@ -18,6 +18,7 @@ const DEMO_MODE = process.env.DEMO_MODE !== "false";
 const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:3000").split(",").map(v => v.trim());
 
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); callback(new Error("Origin not allowed")); }, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
@@ -146,7 +147,13 @@ app.delete("/api/customers/:id", auth, asyncHandler(async (req, res) => {
 
 app.get("/api/reviews", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
-  const items = await Review.find({ clientId }).sort({ reviewedAt: -1 }).limit(100).lean(); res.json({ items });
+  const items = await Review.find({ clientId }).sort({ reviewedAt: -1 }).limit(100).lean(); const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
+  const [items, total] = await Promise.all([
+    Review.find({ clientId }).sort({ reviewedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Review.countDocuments({ clientId })
+  ]);
+  res.json({ items, page, limit, total, hasMore: page * limit < total });
 }));
 app.patch("/api/reviews/:id/response", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
