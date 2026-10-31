@@ -33,10 +33,6 @@ export default function OnboardingPage() {
   });
 
   const submit = async () => {
-    if (!CONVEX_URL) {
-      setError("Onboarding is not connected yet. Configure NEXT_PUBLIC_CONVEX_URL for your Convex deployment before submitting.");
-      return;
-    }
     setSubmitting(true);
     setError(null);
     try {
