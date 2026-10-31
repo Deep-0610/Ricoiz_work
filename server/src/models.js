@@ -17,12 +17,14 @@ const clientSchema = new Schema({
   ownerName: String,
   ownerEmail: { type: String, lowercase: true, trim: true },
   ownerPhone: String,
+  intakePhone: { type: String, trim: true },
   city: String,
   timezone: { type: String, default: "Asia/Kolkata" },
   googleReviewUrl: String,
   status: { type: String, enum: ["demo", "pending", "active", "paused"], default: "demo" },
   demo: { type: Boolean, default: true }
 }, opts);
+clientSchema.index({ intakePhone: 1 }, { unique: true, sparse: true });
 
 const customerSchema = new Schema({
   clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true, index: true },

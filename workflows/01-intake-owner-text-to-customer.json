@@ -1,5 +1,5 @@
 {
-  "name": "WF-REV-INTAKE \u2014 Owner Text \u2192 Customer",
+  "name": "Ricoiz - Customer Intake (Express + MongoDB)",
   "nodes": [
     {
       "id": "1",
@@ -44,10 +44,10 @@
         300
       ],
       "parameters": {
-        "url": "=https://YOUR_CONVEX_DEPLOYMENT/reviews/client-by-intake-phone?intakePhone={{ encodeURIComponent($json.intakePhone) }}",
+        "url": "=https://YOUR_RICOIZ_API_BASE_URL/api/automation/reviews/client-by-intake-phone?intakePhone={{ encodeURIComponent($json.intakePhone) }}",
         "options": {},
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth"
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "notes": "Get clientId from intake phone number",
       "onError": "continueRegularOutput",
@@ -64,13 +64,13 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "https://YOUR_CONVEX_DEPLOYMENT/reviews/customer-add-via-text",
+        "url": "https://YOUR_RICOIZ_API_BASE_URL/api/automation/reviews/customer-add-via-text",
         "sendBody": true,
         "bodyContentType": "json",
         "jsonBody": "={{ JSON.stringify({ clientId: $('Lookup Client by Intake Phone').item.json.clientId, firstName: $('Parse Owner Text').item.json.firstName, phone: $('Parse Owner Text').item.json.phone, intakedFromOwnerPhone: $('Parse Owner Text').item.json.ownerPhone }) }}",
         "options": {},
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth"
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "notes": "Create customer, kick off drip",
       "onError": "continueRegularOutput",
@@ -142,10 +142,10 @@
       ],
       "parameters": {
         "method": "GET",
-        "url": "=https://YOUR_CONVEX_DEPLOYMENT/reviews/opt-out-check?phone={{ encodeURIComponent($node['Parse Owner Text'].json.phone) }}",
+        "url": "=https://YOUR_RICOIZ_API_BASE_URL/api/automation/reviews/opt-out-check?phone={{ encodeURIComponent($node['Parse Owner Text'].json.phone) }}",
         "options": {},
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth"
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "onError": "continueRegularOutput",
       "retryOnFail": true
@@ -221,7 +221,7 @@
         "genericAuthType": "httpBasicAuth",
         "sendBody": true,
         "bodyContentType": "json",
-        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: 'Got it \u2014 ' + $node['Parse Owner Text'].json.firstName + ' added. Check-in text goes out in 2 hours.' }) }}",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: 'Got it — ' + $node['Parse Owner Text'].json.firstName + ' saved. No customer SMS will go out until consent is confirmed.' }) }}",
         "options": {}
       },
       "onError": "continueRegularOutput",
@@ -277,7 +277,7 @@
         "genericAuthType": "httpBasicAuth",
         "sendBody": true,
         "bodyContentType": "json",
-        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: \"This number isn't registered for Review Engine \u2014 contact support.\" }) }}",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: \"This number isn't registered for Review Engine — contact support.\" }) }}",
         "options": {}
       },
       "notes": "H4: sent when intake phone lookup returns no client.",
@@ -316,7 +316,7 @@
           ]
         }
       },
-      "notes": "H5: branch on POST Customer Add response \u2014 success / duplicate / opted-out."
+      "notes": "H5: branch on POST Customer Add response — success / duplicate / opted-out."
     },
     {
       "id": "78b8b652-bc00-4cb6-b023-2df1c2cbab52",
@@ -391,7 +391,7 @@
         "genericAuthType": "httpBasicAuth",
         "sendBody": true,
         "bodyContentType": "json",
-        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: $node['Parse Owner Text'].json.firstName + ' has opted out \u2014 not added.' }) }}",
+        "jsonBody": "={{ JSON.stringify({ direction: 'outbound', status: 'outbox', local_phone: $node['Webhook (Close Inbound)'].json.body.event.data.local_phone, remote_phone: $node['Webhook (Close Inbound)'].json.body.event.data.remote_phone, text: $node['Parse Owner Text'].json.firstName + ' has opted out — not added.' }) }}",
         "options": {}
       },
       "notes": "H5: honest response when target is on the global opt-out list.",
