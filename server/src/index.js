@@ -35,9 +35,9 @@ const auth = asyncHandler(async (req, res, next) => {
     next();
   } catch { return res.status(401).json({ error: "Invalid or expired session" }); }
 });
-const clientScope = req => req.user.clientId || req.query.clientId || req.body.clientId;
+const clientScope = req => req.user.clientId || req.query.clientId || req.body?.clientId;
 const requireClient = (req, res) => {
-  const id = clientScope(req);
+  const id = String(clientScope(req) || "");
   if (!id || !mongoose.isValidObjectId(id)) { res.status(400).json({ error: "A valid workspace is required" }); return null; }
   if (req.user.clientId?.toString() !== id) { res.status(403).json({ error: "Workspace access denied" }); return null; }
   return id;
