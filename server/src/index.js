@@ -187,7 +187,7 @@ app.get("/api/integrations/google-business-profile/accounts", auth, asyncHandler
 app.get("/api/integrations/google-business-profile/locations", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const account = String(req.query.account || "");
-  if (!/^accounts\\/[A-Za-z0-9_-]+$/.test(account)) return res.status(400).json({ error: "A valid Google account resource name is required" });
+  if (!/^accounts\/[A-Za-z0-9_-]+$/.test(account)) return res.status(400).json({ error: "A valid Google account resource name is required" });
   const connection = await IntegrationConnection.findOne({ clientId, provider: "google-business-profile", status: "connected" });
   if (!connection) return res.status(404).json({ error: "Google Business Profile is not connected" });
   const accessToken = await googleAccessToken(connection, doc => doc.save());
@@ -195,7 +195,7 @@ app.get("/api/integrations/google-business-profile/locations", auth, asyncHandle
 }));
 app.post("/api/integrations/google-business-profile/location", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
-  const parsed = z.object({ accountName: z.string().regex(/^accounts\\/[A-Za-z0-9_-]+$/), locationName: z.string().regex(/^accounts\\/[A-Za-z0-9_-]+\\/locations\\/[A-Za-z0-9_-]+$/), locationTitle: z.string().trim().min(1).max(200) }).safeParse(req.body);
+  const parsed = z.object({ accountName: z.string().regex(/^accounts\/[A-Za-z0-9_-]+$/), locationName: z.string().regex(/^accounts\/[A-Za-z0-9_-]+\/locations\/[A-Za-z0-9_-]+$/), locationTitle: z.string().trim().min(1).max(200) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Valid Google account and location are required" });
   const connection = await IntegrationConnection.findOneAndUpdate({ clientId, provider: "google-business-profile" }, { $set: { externalAccountName: parsed.data.accountName, locationName: parsed.data.locationName, locationTitle: parsed.data.locationTitle } }, { new: true });
   if (!connection) return res.status(404).json({ error: "Google Business Profile is not connected" });
