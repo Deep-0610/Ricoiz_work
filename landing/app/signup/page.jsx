@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API_URL = "";
 
 export default function SignupPage() {
   const [form, setForm] = useState({ name: "", email: "", businessName: "", city: "", password: "", confirmPassword: "" });
@@ -39,7 +39,7 @@ export default function SignupPage() {
         <div>
           <a href="/" className="text-sm font-bold uppercase tracking-widest text-brand">Ricoiz</a>
           <h1 className="mt-3 text-3xl font-bold text-slate-900">Create your workspace</h1>
-          <p className="mt-2 text-sm text-slate-500">Set up your owner account. Your workspace starts pending until integrations and messaging permissions are reviewed.</p>
+          <p className="mt-2 text-sm text-slate-500">Set up your owner account. Your workspace is private to your business. Connect your review sources after creating your account.</p>
         </div>
         {[
           ["name", "Your full name", "text"],
