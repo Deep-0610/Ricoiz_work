@@ -149,6 +149,12 @@ app.patch("/api/campaigns/:id/status", auth, asyncHandler(async (req, res) => {
 
 
 
+app.get("/api/settings/intake-phone", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const client = await Client.findById(clientId).select("intakePhone").lean();
+  res.json({ intakePhone: client?.intakePhone || null });
+}));
+
 app.patch("/api/settings/intake-phone", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ intakePhone: z.string().trim().min(7).max(25) }).safeParse(req.body);
