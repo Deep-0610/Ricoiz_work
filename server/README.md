@@ -1,4 +1,4 @@
-# MongoDB migration branch
+# Ricoiz MongoDB API
 
 This branch adds a MongoDB-backed Express API for Ricoiz and switches the Next.js onboarding and dashboard to it. MongoDB collections replace the primary app data layer for the new API: users, clients/workspaces, customers, reviews, campaigns, SMS activity, and onboarding submissions.
 
