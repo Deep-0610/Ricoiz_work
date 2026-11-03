@@ -24,6 +24,8 @@ app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: "draft-7", legacyHeaders: false }));
+const authRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Too many sign-in attempts. Please try again in 15 minutes." } });
+const onboardingRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Too many onboarding submissions. Please try again later." } });
 
 const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const tokenFor = user => jwt.sign({ sub: user._id.toString(), role: user.role, clientId: user.clientId?.toString() || null }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || "7d" });
@@ -48,7 +50,7 @@ const requireClient = (req, res) => {
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "ricoiz-api", database: mongoose.connection.readyState === 1 ? "connected" : "disconnected", demoMode: DEMO_MODE }));
 
-app.post("/api/auth/login", asyncHandler(async (req, res) => {
+app.post("/api/auth/login", authRateLimit, asyncHandler(async (req, res) => {
   const parsed = z.object({ email: z.string().email(), password: z.string().min(8) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Valid email and password are required" });
   const user = await User.findOne({ email: parsed.data.email.toLowerCase() }).select("+passwordHash");
@@ -56,7 +58,7 @@ app.post("/api/auth/login", asyncHandler(async (req, res) => {
   res.cookie("ricoiz_session", tokenFor(user), { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 });
   return res.json({ ok: true, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
 }));
-app.post("/api/auth/register", asyncHandler(async (req, res) => {
+app.post("/api/auth/register", authRateLimit, asyncHandler(async (req, res) => {
   const parsed = z.object({
     name: z.string().trim().min(2).max(100),
     email: z.string().trim().email().max(254),
@@ -88,7 +90,7 @@ app.post("/api/auth/register", asyncHandler(async (req, res) => {
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
 app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
 
-app.post("/api/onboarding", asyncHandler(async (req, res) => {
+app.post("/api/onboarding", onboardingRateLimit, asyncHandler(async (req, res) => {
   const schema = z.object({
     businessName: z.string().trim().min(2).max(120),
     ownerFirstName: z.string().trim().min(1).max(80),

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API_URL = "";
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
@@ -38,6 +38,7 @@ export default function OnboardingPage() {
     try {
       const res = await fetch(`${API_URL}/api/onboarding`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
