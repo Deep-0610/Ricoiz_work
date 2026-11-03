@@ -33,6 +33,7 @@ const clientSchema = new Schema({
   ownerEmail: { type: String, lowercase: true, trim: true },
   ownerPhone: String,
   intakePhone: { type: String, trim: true },
+  smsFromNumber: { type: String, trim: true },
   city: String,
   timezone: { type: String, default: "Asia/Kolkata" },
   googleReviewUrl: String,
@@ -80,6 +81,9 @@ const campaignSchema = new Schema({
   status: { type: String, enum: ["draft", "scheduled", "active", "paused", "completed"], default: "draft" },
   audienceCount: { type: Number, default: 0 },
   sentCount: { type: Number, default: 0 },
+  failedCount: { type: Number, default: 0 },
+  queuedCount: { type: Number, default: 0 },
+  dispatchedAt: Date,
   messageTemplate: String,
   demo: { type: Boolean, default: true }
 }, opts);
@@ -92,6 +96,9 @@ const smsActivitySchema = new Schema({
   body: String,
   status: { type: String, enum: ["queued", "sent", "delivered", "failed", "mock"], default: "mock" },
   providerId: String,
+  providerStatus: String,
+  providerErrorCode: String,
+  campaignId: { type: Schema.Types.ObjectId, ref: "Campaign" },
   demo: { type: Boolean, default: true }
 }, opts);
 smsActivitySchema.index({ clientId: 1, status: 1, createdAt: -1 });
