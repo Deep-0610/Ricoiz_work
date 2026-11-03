@@ -13,7 +13,7 @@ export async function syncGoogleReviewsForTenant(clientId) {
     Client.findById(clientId).select("_id status").lean(),
     IntegrationConnection.findOne({ clientId, provider: "google-business-profile", status: "connected" })
   ]);
-  if (!client || client.status === "paused") return { skipped: "workspace_inactive", synced: 0 };
+  if (!client || client.status !== "active") return { skipped: "workspace_inactive", synced: 0 };
   if (!connection?.locationName) return { skipped: "google_location_not_configured", synced: 0 };
 
   const accessToken = await googleAccessToken(connection, document => document.save());
