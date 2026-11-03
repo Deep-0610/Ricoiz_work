@@ -33,13 +33,23 @@ const clientSchema = new Schema({
   ownerEmail: { type: String, lowercase: true, trim: true },
   ownerPhone: String,
   intakePhone: { type: String, trim: true },
+  smsFromNumber: { type: String, trim: true },
   city: String,
   timezone: { type: String, default: "Asia/Kolkata" },
   googleReviewUrl: String,
   status: { type: String, enum: ["demo", "pending", "active", "paused"], default: "demo" },
+  stripeCustomerId: { type: String, sparse: true, unique: true },
+  stripeSubscriptionId: { type: String, sparse: true, unique: true },
+  billingPlan: { type: String, enum: ["free", "starter", "growth", "scale"], default: "free" },
+  billingInterval: { type: String, enum: ["month", "year"] },
+  billingStatus: { type: String, enum: ["inactive", "trialing", "active", "past_due", "canceled", "unpaid", "incomplete", "paused"], default: "inactive" },
+  billingPriceId: String,
+  billingCurrentPeriodEnd: Date,
+  billingCancelAtPeriodEnd: { type: Boolean, default: false },
   demo: { type: Boolean, default: true }
 }, opts);
 clientSchema.index({ intakePhone: 1 }, { unique: true, sparse: true });
+clientSchema.index({ smsFromNumber: 1 }, { unique: true, sparse: true });
 
 const customerSchema = new Schema({
   clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true, index: true },
@@ -80,6 +90,9 @@ const campaignSchema = new Schema({
   status: { type: String, enum: ["draft", "scheduled", "active", "paused", "completed"], default: "draft" },
   audienceCount: { type: Number, default: 0 },
   sentCount: { type: Number, default: 0 },
+  failedCount: { type: Number, default: 0 },
+  queuedCount: { type: Number, default: 0 },
+  dispatchedAt: Date,
   messageTemplate: String,
   demo: { type: Boolean, default: true }
 }, opts);
@@ -92,6 +105,9 @@ const smsActivitySchema = new Schema({
   body: String,
   status: { type: String, enum: ["queued", "sent", "delivered", "failed", "mock"], default: "mock" },
   providerId: String,
+  providerStatus: String,
+  providerErrorCode: String,
+  campaignId: { type: Schema.Types.ObjectId, ref: "Campaign" },
   demo: { type: Boolean, default: true }
 }, opts);
 smsActivitySchema.index({ clientId: 1, status: 1, createdAt: -1 });
@@ -122,7 +138,7 @@ export const Campaign = models.Campaign || model("Campaign", campaignSchema);
 export const SmsActivity = models.SmsActivity || model("SmsActivity", smsActivitySchema);
 const integrationConnectionSchema = new Schema({
   clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true, index: true },
-  provider: { type: String, required: true, enum: ["google-business-profile", "close-crm", "n8n", "stripe", "ai"] },
+  provider: { type: String, required: true, enum: ["google-business-profile", "yelp", "meta-facebook", "close-crm", "n8n", "stripe", "ai"] },
   status: { type: String, enum: ["connected", "reauth_required", "disconnected"], default: "disconnected" },
   accessTokenEncrypted: String,
   refreshTokenEncrypted: String,
@@ -139,3 +155,11 @@ integrationConnectionSchema.index({ clientId: 1, provider: 1 }, { unique: true }
 
 export const IntegrationConnection = models.IntegrationConnection || model("IntegrationConnection", integrationConnectionSchema);
 export const Onboarding = models.Onboarding || model("Onboarding", onboardingSchema);
+
+
+const stripeWebhookEventSchema = new Schema({
+  eventId: { type: String, required: true, unique: true },
+  type: { type: String, required: true },
+  processedAt: { type: Date, default: Date.now }
+}, opts);
+export const StripeWebhookEvent = models.StripeWebhookEvent || model("StripeWebhookEvent", stripeWebhookEventSchema);
