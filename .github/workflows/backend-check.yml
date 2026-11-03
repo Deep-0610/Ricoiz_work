@@ -2,7 +2,7 @@ name: Backend syntax validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, production/phase-1-tenant-security-tests]
     paths:
       - "server/**"
       - ".github/workflows/backend-check.yml"
