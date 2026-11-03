@@ -67,10 +67,9 @@ test("review inbox filters reviews and publishes a Google reply", async ({ page 
   });
 
   await page.goto("/dashboard/reviews");
-  await expect(page.getByText("Alex Example")).toBeVisible();
-
   await page.getByLabel("Filter reply status").selectOption("unanswered");
   await expect.poll(() => requestedUrls.some(url => new URL(url).searchParams.get("responseStatus") === "unanswered")).toBeTruthy();
+  await expect(page.getByText("Alex Example")).toBeVisible();
 
   await page.getByLabel("Google reply").fill("Thank you for sharing your feedback!");
   await page.getByRole("button", { name: "Publish Google reply" }).click();

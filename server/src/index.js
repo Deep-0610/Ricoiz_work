@@ -12,7 +12,8 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { tenantGuard } from "./middleware/tenantGuard.js";
-import { User, Client, Customer, Review, Campaign, SmsActivity, Onboarding, IntegrationConnection } from "./models.js";
+import { User, Client, Customer, Review, Campaign, SmsActivity, Onboarding, IntegrationConnection, StripeWebhookEvent } from "./models.js";
+import { getStripe, getPlanCatalog, getPlanPrice, getPlanLimits, findConfiguredPrice, createCheckoutSession, createPortalSession, verifyStripeWebhook } from "./stripeBilling.js";
 import { googleAuthorizationUrl, exchangeGoogleCode, encryptToken, decryptToken, googleUserInfo, googleAccessToken, listGoogleAccounts, listGoogleLocations, listGoogleReviews, publishGoogleReviewReply } from "./googleBusinessProfile.js";
 import { getYelpBusiness } from "./yelpFusion.js";
 import { metaAuthorizationUrl, exchangeMetaCode, listManagedFacebookPages, getFacebookPage } from "./metaGraph.js";
@@ -27,6 +28,47 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); callback(new Error("Origin not allowed")); }, credentials: true }));
+const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+app.post("/api/webhooks/stripe", express.raw({ type: "application/json", limit: "1mb" }), asyncHandler(async (req, res) => {
+  let event;
+  try { event = verifyStripeWebhook(req.body, req.get("stripe-signature")); }
+  catch (error) { return res.status(400).json({ success: false, error: "Invalid Stripe webhook signature" }); }
+  if (await StripeWebhookEvent.exists({ eventId: event.id })) return res.json({ received: true, duplicate: true });
+  const syncSubscription = async subscription => {
+    const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
+    const clientId = subscription.metadata?.clientId;
+    const tenantLookup = [];
+    if (customerId) tenantLookup.push({ stripeCustomerId: customerId });
+    if (clientId && mongoose.isValidObjectId(clientId)) tenantLookup.push({ _id: clientId });
+    if (!tenantLookup.length) return;
+    const client = await Client.findOne({ $or: tenantLookup });
+    if (!client) return;
+    const priceId = subscription.items?.data?.[0]?.price?.id || "";
+    const configured = findConfiguredPrice(priceId);
+    client.stripeCustomerId = customerId || client.stripeCustomerId;
+    client.stripeSubscriptionId = subscription.id;
+    client.billingPlan = configured?.key || client.billingPlan || "free";
+    client.billingInterval = configured?.interval || client.billingInterval;
+    client.billingPriceId = priceId;
+    client.billingStatus = subscription.status || "inactive";
+    client.billingCurrentPeriodEnd = subscription.current_period_end ? new Date(subscription.current_period_end * 1000) : null;
+    client.billingCancelAtPeriodEnd = Boolean(subscription.cancel_at_period_end);
+    await client.save();
+  };
+  if (event.type.startsWith("customer.subscription.")) {
+    await syncSubscription(event.data.object);
+  } else if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const subscriptionId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
+    if (subscriptionId) await syncSubscription(await getStripe().subscriptions.retrieve(subscriptionId));
+  } else if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded" || event.type === "invoice.payment_failed") {
+    const invoice = event.data.object;
+    const subscriptionId = invoice.subscription || invoice.parent?.subscription_details?.subscription;
+    if (subscriptionId) await syncSubscription(await getStripe().subscriptions.retrieve(typeof subscriptionId === "string" ? subscriptionId : subscriptionId.id));
+  }
+  await StripeWebhookEvent.create({ eventId: event.id, type: event.type, processedAt: new Date() });
+  return res.json({ received: true });
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false, limit: "32kb" }));
 app.use(cookieParser());
@@ -34,7 +76,6 @@ app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeader
 const authRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Too many sign-in attempts. Please try again in 15 minutes." } });
 const onboardingRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Too many onboarding submissions. Please try again later." } });
 
-const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const tokenFor = user => jwt.sign({ sub: user._id.toString(), role: user.role, clientId: user.clientId?.toString() || null }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || "7d" });
 const auth = asyncHandler(async (req, res, next) => {
   const token = req.cookies?.ricoiz_session || (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
@@ -56,6 +97,54 @@ const requireClient = (req, res) => {
 };
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "ricoiz-api", database: mongoose.connection.readyState === 1 ? "connected" : "disconnected", demoMode: DEMO_MODE }));
+
+const effectivePlanFor = client => ["active", "trialing"].includes(client.billingStatus) ? (client.billingPlan || "free") : "free";
+app.get("/api/billing/plans", auth, tenantGuard, (_req, res) => {
+  res.json({ success: true, data: getPlanCatalog() });
+});
+app.post("/api/billing/checkout", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const parsed = z.object({ plan: z.enum(["starter", "growth", "scale"]), interval: z.enum(["month", "year"]) }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: "Choose a valid plan and billing interval" });
+  const selected = getPlanPrice(parsed.data.plan, parsed.data.interval);
+  if (!selected) return res.status(409).json({ success: false, error: "This plan price is not configured in Stripe yet" });
+  const client = await Client.findById(clientId);
+  if (!client) return res.status(404).json({ success: false, error: "Workspace not found" });
+  const frontend = String(process.env.FRONTEND_URL || allowedOrigins[0] || "http://localhost:3000").replace(/\/$/, "");
+  const session = await createCheckoutSession({
+    client,
+    priceId: selected.priceId,
+    successUrl: `${frontend}/dashboard/settings?billing=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancelUrl: `${frontend}/dashboard/settings?billing=cancelled`
+  });
+  res.status(201).json({ success: true, data: { checkoutUrl: session.url, sessionId: session.id } });
+}));
+app.post("/api/billing/portal", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const client = await Client.findById(clientId).select("stripeCustomerId").lean();
+  if (!client) return res.status(404).json({ success: false, error: "Workspace not found" });
+  const frontend = String(process.env.FRONTEND_URL || allowedOrigins[0] || "http://localhost:3000").replace(/\/$/, "");
+  const session = await createPortalSession(client.stripeCustomerId, `${frontend}/dashboard/settings`);
+  res.json({ success: true, data: { portalUrl: session.url } });
+}));
+app.get("/api/billing/status", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const client = await Client.findById(clientId).select("billingPlan billingInterval billingStatus billingPriceId billingCurrentPeriodEnd billingCancelAtPeriodEnd").lean();
+  if (!client) return res.status(404).json({ success: false, error: "Workspace not found" });
+  const plan = effectivePlanFor(client);
+  const limits = getPlanLimits(plan);
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const [customers, sms] = await Promise.all([
+    Customer.countDocuments({ clientId }),
+    SmsActivity.countDocuments({ clientId, direction: "outbound", createdAt: { $gte: monthStart }, status: { $in: ["queued", "sent", "delivered"] } })
+  ]);
+  res.json({ success: true, data: {
+    plan, status: client.billingStatus || "inactive", interval: client.billingInterval || null,
+    currentPeriodEnd: client.billingCurrentPeriodEnd || null, cancelAtPeriodEnd: Boolean(client.billingCancelAtPeriodEnd),
+    usage: { customers, monthlySms: sms }, limits
+  } });
+}));
+
 
 app.post("/api/auth/login", authRateLimit, asyncHandler(async (req, res) => {
   const parsed = z.object({ email: z.string().email(), password: z.string().min(8) }).safeParse(req.body);
@@ -190,6 +279,11 @@ app.post("/api/customers", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ firstName: z.string().trim().min(1).max(80), lastName: z.string().max(80).optional(), phone: z.string().trim().min(7).max(25), email: z.string().email().optional(), consentStatus: z.enum(["unknown", "granted", "revoked"]).default("unknown") }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid customer details", details: parsed.error.flatten() });
+  const workspace = await Client.findById(clientId).select("billingPlan billingStatus").lean();
+  const plan = effectivePlanFor(workspace || {});
+  const customerLimit = getPlanLimits(plan).customers;
+  const existingCustomers = await Customer.countDocuments({ clientId });
+  if (existingCustomers >= customerLimit) return res.status(409).json({ success: false, code: "CUSTOMER_LIMIT_REACHED", error: `Your ${plan} plan allows ${customerLimit} customers. Upgrade your plan to add more.` });
   const item = await Customer.create({ ...parsed.data, clientId });
   res.status(201).json({ item });
 }));
@@ -289,6 +383,13 @@ app.post("/api/campaigns/:id/dispatch", auth, tenantGuard, asyncHandler(async (r
   if (campaign.status === "active" || campaign.status === "completed") return res.status(409).json({ success: false, error: "This campaign has already been dispatched" });
   const template = String(campaign.messageTemplate || "").trim();
   if (!template) return res.status(400).json({ success: false, error: "Add an SMS message template before dispatching" });
+  const workspaceForQuota = await Client.findById(clientId).select("billingPlan billingStatus").lean();
+  const effectivePlan = effectivePlanFor(workspaceForQuota || {});
+  const smsLimit = getPlanLimits(effectivePlan).monthlySms;
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const smsUsed = await SmsActivity.countDocuments({ clientId, direction: "outbound", createdAt: { $gte: monthStart }, status: { $in: ["queued", "sent", "delivered"] } });
+  const eligibleRecipients = await Customer.countDocuments({ clientId, consentStatus: "granted", consentAt: { $ne: null }, optedOutAt: null });
+  if (smsLimit <= smsUsed || smsUsed + eligibleRecipients > smsLimit) return res.status(409).json({ success: false, code: "SMS_QUOTA_REACHED", error: "Your plan does not have enough remaining SMS quota for this campaign. Upgrade to continue sending." });
   let queued = 0;
   const cursor = Customer.find({ clientId, consentStatus: "granted", consentAt: { $ne: null }, optedOutAt: null }).cursor();
   for await (const customer of cursor) {
@@ -677,6 +778,7 @@ app.get("/api/integrations/status", auth, tenantGuard, asyncHandler(async (req, 
   const google = byProvider["google-business-profile"];
   const yelp = byProvider.yelp;
   const facebook = byProvider["meta-facebook"];
+  const billingClient = await Client.findById(req.user.clientId).select("billingStatus billingPlan").lean();
   res.json({
   integrations: [
     { key: "mongodb", name: "MongoDB", status: mongoose.connection.readyState === 1 ? "connected" : "disconnected" },
@@ -685,7 +787,7 @@ app.get("/api/integrations/status", auth, tenantGuard, asyncHandler(async (req, 
     { key: "facebook", name: "Facebook", status: facebook?.status || "not_connected", pageName: facebook?.externalAccountName || null, reviewSyncSupported: false, note: facebook?.metadata?.limitation || "Meta Page connection requires app review and Page permissions; Page review endpoints are no longer available in Graph API v22+." },
     { key: "close-crm", name: "Close CRM", status: "demo_only" },
     { key: "n8n", name: "n8n automation", status: "demo_only" },
-    { key: "stripe", name: "Stripe billing", status: "not_connected" },
+    { key: "stripe", name: "Stripe billing", status: billingClient?.billingStatus || "inactive", plan: billingClient?.billingPlan || "free" },
     { key: "ai", name: "AI responses", status: "demo_only" }
   ],
   demo: DEMO_MODE
