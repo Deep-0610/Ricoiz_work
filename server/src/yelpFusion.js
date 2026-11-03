@@ -23,5 +23,5 @@ export async function getYelpBusiness(businessId) {
 
 export async function listYelpReviews(businessId) {
   if (!/^[A-Za-z0-9_-]{3,200}$/.test(String(businessId || ""))) throw new Error("A valid Yelp business ID is required");
-  return yelpFetch(`/businesses/${encodeURIComponent(businessId)}/reviews?limit=20&sort_by=newest`);
+  return yelpFetch(`/businesses/${encodeURIComponent(businessId)}/reviews?limit=3&sort_by=newest`);
 }
