@@ -151,12 +151,24 @@ app.get("/api/reviews", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
-  const [items, total] = await Promise.all([
-    Review.find({ clientId }).sort({ reviewedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-    Review.countDocuments({ clientId })
+  const filter = { clientId };
+  const platform = String(req.query.platform || "all").toLowerCase();
+  if (["google", "yelp", "facebook"].includes(platform)) filter.platform = platform;
+  const rating = Number(req.query.rating || 0);
+  if (Number.isInteger(rating) && rating >= 1 && rating <= 5) filter.rating = rating;
+  const search = String(req.query.search || "").trim().slice(0, 100);
+  if (search) {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    filter.$or = [{ author: new RegExp(escaped, "i") }, { text: new RegExp(escaped, "i") }];
+  }
+  const [items, total, platformCounts] = await Promise.all([
+    Review.find(filter).sort({ reviewedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Review.countDocuments(filter),
+    Review.aggregate([{ $match: { clientId } }, { $group: { _id: "$platform", count: { $sum: 1 } } }])
   ]);
-  res.json({ items, page, limit, total, hasMore: page * limit < total });
+  res.json({ items, page, limit, total, hasMore: page * limit < total, platformCounts: Object.fromEntries(platformCounts.map(item => [item._id, item.count])) });
 }));
+ 
 app.patch("/api/reviews/:id/response", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ response: z.string().trim().min(1).max(5000), responseStatus: z.enum(["draft", "approved"]) }).safeParse(req.body);
@@ -366,6 +378,8 @@ app.get("/api/integrations/status", auth, asyncHandler(async (req, res) => {
   integrations: [
     { key: "mongodb", name: "MongoDB", status: mongoose.connection.readyState === 1 ? "connected" : "disconnected" },
     { key: "google-business-profile", name: "Google Business Profile", status: connection?.status || "not_connected", accountEmail: connection?.externalAccountEmail || null, location: connection?.locationTitle || null },
+    { key: "yelp", name: "Yelp", status: "not_connected", note: "API access and partner approval required" },
+    { key: "facebook", name: "Facebook", status: "not_connected", note: "Meta app review and Page permissions required" },
     { key: "close-crm", name: "Close CRM", status: "demo_only" },
     { key: "n8n", name: "n8n automation", status: "demo_only" },
     { key: "stripe", name: "Stripe billing", status: "not_connected" },

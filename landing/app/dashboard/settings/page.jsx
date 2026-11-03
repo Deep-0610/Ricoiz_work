@@ -91,6 +91,18 @@ export default function SettingsPage() {
       {locationTitle && <p className="text-sm text-emerald-700">Selected: {locationTitle}. Open Reviews and run Sync Google reviews.</p>}
       <p className="text-xs leading-5 text-slate-500">Google Cloud OAuth client, Business Profile API access, and the exact redirect URI must be configured on the server before authorization can complete.</p>
     </div>
+    <div className="grid gap-4 md:grid-cols-2">
+      <article className="rounded-2xl border border-slate-200 bg-white p-6">
+        <div className="flex items-center justify-between gap-3"><h2 className="font-bold">Yelp</h2><span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">Not connected</span></div>
+        <p className="mt-2 text-sm text-slate-600">Yelp review ingestion is planned through an approved Yelp API or partner integration. Ricoiz will not scrape reviews or display invented data.</p>
+        <p className="mt-3 text-xs text-slate-500">Requires eligible API access, approved use case, and business authorization.</p>
+      </article>
+      <article className="rounded-2xl border border-slate-200 bg-white p-6">
+        <div className="flex items-center justify-between gap-3"><h2 className="font-bold">Facebook Pages</h2><span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">Not connected</span></div>
+        <p className="mt-2 text-sm text-slate-600">Facebook recommendations and Page feedback require a Meta app with approved permissions and a Page admin authorization flow.</p>
+        <p className="mt-3 text-xs text-slate-500">Requires Meta app review, Page access token, and approved permissions.</p>
+      </article>
+    </div>
     <div className="rounded-2xl border border-slate-200 bg-white p-6"><h2 className="font-bold">Other integrations</h2><p className="mt-2 text-sm text-slate-600">Close CRM, n8n, Stripe and email delivery still require their provider accounts and credentials. They are not marked connected until tested.</p></div>
     {message && <p role="status" className="text-sm text-emerald-700">{message}</p>}
     {error && <p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700">{error}</p>}
