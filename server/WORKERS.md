@@ -57,3 +57,17 @@ npm test
 npm run check
 npm run workers
 ```
+
+## Stripe Billing
+
+Create Starter, Growth, and Scale products and recurring monthly/yearly prices in Stripe Dashboard. Copy each Price ID into the matching `STRIPE_PRICE_* ` environment variable (without the trailing space in the variable name). Configure `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `FRONTEND_URL` on the API service. Never expose the secret or webhook signing key to the browser.
+
+Authenticated billing routes:
+- `GET /api/billing/plans` returns configured plans (it does not expose Price IDs).
+- `POST /api/billing/checkout` accepts `{"plan":"starter|growth|scale","interval":"month|year"}` and returns a hosted Checkout URL.
+- `POST /api/billing/portal` returns a Stripe Customer Portal URL.
+- `GET /api/billing/status` returns the tenant's persisted subscription state and usage.
+
+Configure a Stripe webhook at `https://YOUR_API_HOST/api/webhooks/stripe` for `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, and `invoice.payment_failed`. The endpoint verifies the raw request body using Stripe's signature, and event IDs are stored for idempotent processing. Subscription access is granted from verified webhook state, not the Checkout redirect. Customer quotas and monthly SMS quotas are enforced server-side. Free workspaces have a 100-customer cap and no paid SMS allowance; paid plans use configured plan limits.
+
+Billing is disabled until real Stripe keys and recurring Price IDs are configured. Use Stripe test mode and the Stripe CLI before enabling live billing. Do not mark an account paid from a browser redirect.
