@@ -276,7 +276,7 @@ app.post("/api/campaigns/:id/dispatch", auth, tenantGuard, asyncHandler(async (r
   ]);
   if (!campaign) return res.status(404).json({ success: false, error: "Campaign not found" });
   if (!client) return res.status(409).json({ success: false, error: "Only active workspaces can dispatch SMS campaigns" });
-  if (!/^\\+[1-9]\\d{7,14}$/.test(String(client.smsFromNumber || ""))) {
+  if (!/^\+[1-9]\d{7,14}$/.test(String(client.smsFromNumber || ""))) {
     return res.status(409).json({ success: false, error: "Configure a valid tenant-specific Twilio sender number before dispatch." });
   }
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
