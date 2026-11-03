@@ -156,6 +156,9 @@ app.get("/api/reviews", auth, asyncHandler(async (req, res) => {
   if (["google", "yelp", "facebook"].includes(platform)) filter.platform = platform;
   const rating = Number(req.query.rating || 0);
   if (Number.isInteger(rating) && rating >= 1 && rating <= 5) filter.rating = rating;
+  const responseStatus = String(req.query.responseStatus || "all").toLowerCase();
+  if (responseStatus === "answered") filter.responseStatus = "published";
+  else if (responseStatus === "unanswered") filter.responseStatus = { $ne: "published" };
   const responseFilter = String(req.query.responseStatus || "all").toLowerCase();
   if (responseFilter === "answered") filter.responseStatus = "published";
   else if (responseFilter === "unanswered") filter.responseStatus = { $ne: "published" };
