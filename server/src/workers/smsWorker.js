@@ -35,7 +35,8 @@ export async function deliverSmsJob(data) {
     Client.findById(clientId).select("timezone status").lean(),
     Customer.findOne({ _id: customerId, clientId })
   ]);
-  const policy = validateSmsRecipient(customer, client?.timezone || "UTC");
+  if (!client || client.status === "paused") return { skipped: "workspace_inactive" };
+  const policy = validateSmsRecipient(customer, client.timezone || "UTC");
   if (!policy.allowed) {
     await SmsActivity.create({
       clientId,
@@ -47,7 +48,7 @@ export async function deliverSmsJob(data) {
     });
     return { skipped: policy.reason };
   }
-  if (!client || client.status === "paused") return { skipped: "workspace_inactive" };
+  if (process.env.SMS_DELIVERY_ENABLED !== "true") return { skipped: "sms_delivery_disabled" };
 
   const activity = await SmsActivity.create({
     clientId,
