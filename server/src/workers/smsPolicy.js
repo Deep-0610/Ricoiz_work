@@ -18,11 +18,11 @@ export function isWithinSmsWindow(timeZone, now = new Date()) {
 
 export function validateSmsRecipient(customer, timeZone, now = new Date()) {
   if (!customer) return { allowed: false, reason: "customer_not_found" };
-  if (customer.consentStatus !== "granted" || !customer.consentAt) {
-    return { allowed: false, reason: "documented_consent_required" };
-  }
   if (customer.optedOutAt || customer.consentStatus === "revoked") {
     return { allowed: false, reason: "opted_out" };
+  }
+  if (customer.consentStatus !== "granted" || !customer.consentAt) {
+    return { allowed: false, reason: "documented_consent_required" };
   }
   if (!E164.test(String(customer.phone || ""))) {
     return { allowed: false, reason: "invalid_phone" };
