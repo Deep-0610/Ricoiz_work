@@ -336,7 +336,7 @@ app.post("/api/integrations/google-business-profile/sync-reviews", auth, asyncHa
       if (!rating) continue;
       await Review.findOneAndUpdate(
         { clientId, externalId: review.reviewId, platform: "google" },
-        { $set: { rating, author: review.reviewer?.displayName || "Google user", text: review.comment || "", response: review.reviewReply?.comment || "", responseStatus: review.reviewReply?.comment ? "published" : "not_started", reviewedAt: review.createTime ? new Date(review.createTime) : new Date(), demo: false } },
+        { $set: { externalId: review.reviewId, platform: "google", rating, author: review.reviewer?.displayName || "Google user", text: review.comment || "", response: review.reviewReply?.comment || "", responseStatus: review.reviewReply?.comment ? "published" : "not_started", reviewedAt: review.createTime ? new Date(review.createTime) : new Date(), demo: false } },
         { upsert: true, new: true }
       );
       synced++;
