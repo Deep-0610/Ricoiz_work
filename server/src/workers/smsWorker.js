@@ -5,14 +5,14 @@ import { QUEUE_NAMES } from "../queues/index.js";
 import { getRedisConnection } from "../queues/connection.js";
 import { validateSmsRecipient } from "./smsPolicy.js";
 
-async function sendTwilioSms({ to, body }) {
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM_NUMBER) {
+async function sendTwilioSms({ to, from, body }) {
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_STATUS_CALLBACK_URL } = process.env;
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_STATUS_CALLBACK_URL || !from) {
     throw new Error("Twilio is not configured; SMS delivery is disabled");
   }
   const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
-  const form = new URLSearchParams({ To: to, From: TWILIO_FROM_NUMBER, Body: body });
-  if (process.env.TWILIO_STATUS_CALLBACK_URL) form.set("StatusCallback", process.env.TWILIO_STATUS_CALLBACK_URL);
+  const form = new URLSearchParams({ To: to, From: from, Body: body });
+  form.set("StatusCallback", TWILIO_STATUS_CALLBACK_URL);
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
     method: "POST",
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
@@ -33,7 +33,7 @@ export async function deliverSmsJob(data) {
     throw new Error("Invalid tenant or customer id");
   }
   const [client, customer] = await Promise.all([
-    Client.findById(clientId).select("timezone status").lean(),
+    Client.findById(clientId).select("timezone status smsFromNumber").lean(),
     Customer.findOne({ _id: customerId, clientId })
   ]);
   if (!client || client.status !== "active") return { skipped: "workspace_inactive" };
@@ -63,7 +63,7 @@ export async function deliverSmsJob(data) {
     demo: false
   });
   try {
-    const result = await sendTwilioSms({ to: customer.phone, body });
+    const result = await sendTwilioSms({ to: customer.phone, from: client.smsFromNumber, body });
     activity.status = "sent";
     activity.providerId = result.sid;
     activity.providerStatus = result.status || "queued";
