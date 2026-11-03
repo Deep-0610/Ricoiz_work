@@ -130,7 +130,7 @@ export const Campaign = models.Campaign || model("Campaign", campaignSchema);
 export const SmsActivity = models.SmsActivity || model("SmsActivity", smsActivitySchema);
 const integrationConnectionSchema = new Schema({
   clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true, index: true },
-  provider: { type: String, required: true, enum: ["google-business-profile", "close-crm", "n8n", "stripe", "ai"] },
+  provider: { type: String, required: true, enum: ["google-business-profile", "yelp", "meta-facebook", "close-crm", "n8n", "stripe", "ai"] },
   status: { type: String, enum: ["connected", "reauth_required", "disconnected"], default: "disconnected" },
   accessTokenEncrypted: String,
   refreshTokenEncrypted: String,
