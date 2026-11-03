@@ -1,5 +1,7 @@
 import "dotenv/config";
 import { timingSafeEqual } from "node:crypto";
+import { enqueueSms } from "./queues/index.js";
+import { normalizeTwilioStatus, renderSmsTemplate, verifyTwilioSignature } from "./smsCompliance.js";
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
@@ -23,6 +25,7 @@ app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); callback(new Error("Origin not allowed")); }, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "32kb" }));
 app.use(cookieParser());
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: "draft-7", legacyHeaders: false }));
 const authRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Too many sign-in attempts. Please try again in 15 minutes." } });
@@ -192,6 +195,22 @@ app.patch("/api/customers/:id", auth, tenantGuard, asyncHandler(async (req, res)
   const item = await Customer.findOneAndUpdate({ _id: req.params.id, clientId }, { $set: req.body }, { new: true, runValidators: true });
   if (!item) return res.status(404).json({ error: "Customer not found" }); res.json({ item });
 }));
+
+app.patch("/api/customers/:id/consent", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const parsed = z.object({
+    consentStatus: z.enum(["granted", "revoked"]),
+    consentSource: z.string().trim().min(3).max(200)
+  }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: "Consent status and documented consent source are required" });
+  const update = parsed.data.consentStatus === "granted"
+    ? { consentStatus: "granted", consentSource: parsed.data.consentSource, consentAt: new Date(), optedOutAt: null }
+    : { consentStatus: "revoked", consentSource: parsed.data.consentSource, optedOutAt: new Date() };
+  const customer = await Customer.findOneAndUpdate({ _id: req.params.id, clientId }, { $set: update }, { new: true }).select("-__v");
+  if (!customer) return res.status(404).json({ success: false, error: "Customer not found" });
+  res.json({ success: true, data: { id: customer._id, consentStatus: customer.consentStatus, consentAt: customer.consentAt, optedOutAt: customer.optedOutAt } });
+}));
+
 app.delete("/api/customers/:id", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const item = await Customer.findOneAndDelete({ _id: req.params.id, clientId });
@@ -242,13 +261,62 @@ app.post("/api/campaigns", auth, tenantGuard, asyncHandler(async (req, res) => {
   const item = await Campaign.create({ ...parsed.data, clientId, status: "draft", demo: DEMO_MODE });
   res.status(201).json({ item });
 }));
+
+app.post("/api/campaigns/:id/dispatch", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  if (process.env.SMS_DELIVERY_ENABLED !== "true") {
+    return res.status(409).json({ success: false, error: "SMS dispatch is disabled. Configure Twilio and explicitly enable SMS_DELIVERY_ENABLED." });
+  }
+  if (!process.env.TWILIO_WEBHOOK_BASE_URL || !process.env.TWILIO_STATUS_CALLBACK_URL) {
+    return res.status(503).json({ success: false, error: "Signed Twilio inbound and status callback URLs must be configured before dispatch." });
+  }
+  const [campaign, client] = await Promise.all([
+    Campaign.findOne({ _id: req.params.id, clientId }),
+    Client.findOne({ _id: clientId, status: "active" }).select("businessName status smsFromNumber").lean()
+  ]);
+  if (!campaign) return res.status(404).json({ success: false, error: "Campaign not found" });
+  if (!client) return res.status(409).json({ success: false, error: "Only active workspaces can dispatch SMS campaigns" });
+  if (!/^\+[1-9]\d{7,14}$/.test(String(client.smsFromNumber || ""))) {
+    return res.status(409).json({ success: false, error: "Configure a valid tenant-specific Twilio sender number before dispatch." });
+  }
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+    return res.status(503).json({ success: false, error: "Twilio credentials are not configured on the API service." });
+  }
+  if (campaign.channel !== "sms") return res.status(400).json({ success: false, error: "Only SMS campaigns can be dispatched" });
+  if (campaign.status === "active" || campaign.status === "completed") return res.status(409).json({ success: false, error: "This campaign has already been dispatched" });
+  const template = String(campaign.messageTemplate || "").trim();
+  if (!template) return res.status(400).json({ success: false, error: "Add an SMS message template before dispatching" });
+  let queued = 0;
+  const cursor = Customer.find({ clientId, consentStatus: "granted", consentAt: { $ne: null }, optedOutAt: null }).cursor();
+  for await (const customer of cursor) {
+    let body;
+    try { body = renderSmsTemplate(template, customer, client); }
+    catch (error) { return res.status(400).json({ success: false, error: error.message }); }
+    if (!body || body.length > 1600) return res.status(400).json({ success: false, error: "Rendered SMS messages must contain 1–1600 characters" });
+    await enqueueSms({
+      clientId,
+      customerId: customer._id,
+      body,
+      campaignId: campaign._id,
+      jobId: "campaign-" + String(campaign._id) + "-" + String(customer._id)
+    });
+    queued++;
+  }
+  campaign.status = "active";
+  campaign.queuedCount = queued;
+  campaign.audienceCount = queued;
+  campaign.dispatchedAt = new Date();
+  await campaign.save();
+  res.status(202).json({ success: true, data: { campaignId: campaign._id, queued, status: campaign.status }, message: "Eligible, consented recipients were queued. Final delivery status arrives from Twilio callbacks." });
+}));
+
 app.patch("/api/campaigns/:id/status", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ status: z.enum(["draft", "scheduled", "active", "paused", "completed"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid campaign status" });
   const item = await Campaign.findOneAndUpdate({ _id: req.params.id, clientId }, { status: parsed.data.status }, { new: true });
   if (!item) return res.status(404).json({ error: "Campaign not found" });
-  res.json({ item, message: "Status saved. No real SMS is sent by this demo API." });
+  res.json({ item, message: "Campaign status saved." });
 }));
 
 
@@ -269,6 +337,80 @@ app.patch("/api/settings/intake-phone", auth, tenantGuard, asyncHandler(async (r
   if (assigned) return res.status(409).json({ error: "This intake phone number is already assigned to another workspace" });
   await Client.updateOne({ _id: clientId }, { $set: { intakePhone } });
   res.json({ ok: true, intakePhone });
+}));
+
+
+const twilioWebhookAuth = (req, res, next) => {
+  if (process.env.NODE_ENV !== "production" && process.env.TWILIO_WEBHOOK_VALIDATION_DISABLED === "true") return next();
+  const baseUrl = String(process.env.TWILIO_WEBHOOK_BASE_URL || "").replace(/\/$/, "");
+  if (!baseUrl || !process.env.TWILIO_AUTH_TOKEN) return res.status(503).send("Twilio webhook validation is not configured");
+  const valid = verifyTwilioSignature({
+    authToken: process.env.TWILIO_AUTH_TOKEN,
+    signature: req.get("x-twilio-signature"),
+    url: baseUrl + req.originalUrl,
+    params: req.body || {}
+  });
+  if (!valid) return res.status(403).send("Invalid Twilio signature");
+  next();
+};
+const twiml = message => {
+  const escaped = String(message || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<?xml version="1.0" encoding="UTF-8"?><Response>${escaped ? `<Message>${escaped}</Message>` : ""}</Response>`;
+};
+
+app.post("/api/webhooks/twilio/inbound", twilioWebhookAuth, asyncHandler(async (req, res) => {
+  const from = normalizePhone(req.body.From);
+  const to = normalizePhone(req.body.To);
+  const body = String(req.body.Body || "").trim().slice(0, 1600);
+  if (!from || !to) return res.status(400).send("Invalid phone number");
+  const client = await Client.findOne({ smsFromNumber: to }).select("_id businessName").lean();
+  if (!client) return res.status(404).send("Unknown SMS destination");
+  const customer = await Customer.findOne({ clientId: client._id, phone: from });
+  const keyword = body.toUpperCase().replace(/[^A-Z]/g, "");
+  if (customer && ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(keyword)) {
+    customer.consentStatus = "revoked";
+    customer.optedOutAt = new Date();
+    customer.consentSource = "Twilio inbound " + keyword;
+    await customer.save();
+  }
+  await SmsActivity.create({
+    clientId: client._id,
+    customerId: customer?._id,
+    direction: "inbound",
+    body,
+    status: "delivered",
+    providerId: req.body.MessageSid || undefined,
+    demo: false
+  });
+  let reply = "";
+  if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(keyword)) {
+    reply = "You are opted out and will receive no further messages from this business.";
+  } else if (["HELP", "INFO"].includes(keyword)) {
+    reply = "For help, contact the business directly. Reply STOP to opt out.";
+  } else if (["START", "UNSTOP"].includes(keyword)) {
+    reply = "To resume messages, please provide consent directly to the business. Your previous opt-out remains in effect until consent is documented.";
+  }
+  res.type("text/xml").send(twiml(reply));
+}));
+
+app.post("/api/webhooks/twilio/status", twilioWebhookAuth, asyncHandler(async (req, res) => {
+  const messageSid = String(req.body.MessageSid || "");
+  const status = normalizeTwilioStatus(req.body.MessageStatus);
+  if (!messageSid || !status) return res.status(400).json({ success: false, error: "A valid Twilio MessageSid and status are required" });
+  const activity = await SmsActivity.findOne({ providerId: messageSid, direction: "outbound" });
+  if (!activity) return res.status(404).json({ success: false, error: "SMS activity not found" });
+  const wasFailed = activity.status === "failed";
+  const terminal = ["delivered", "failed"].includes(activity.status);
+  if (!terminal) {
+    activity.status = status;
+    activity.providerStatus = String(req.body.MessageStatus);
+    activity.providerErrorCode = req.body.ErrorCode ? String(req.body.ErrorCode) : undefined;
+    await activity.save();
+  }
+  if (status === "failed" && !wasFailed && activity.campaignId) {
+    await Campaign.updateOne({ _id: activity.campaignId, clientId: activity.clientId }, { $inc: { failedCount: 1 } });
+  }
+  res.json({ success: true });
 }));
 
 const n8nAutomationAuth = (req, res, next) => {

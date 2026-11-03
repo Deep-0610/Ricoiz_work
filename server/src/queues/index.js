@@ -38,7 +38,7 @@ export async function enqueueGoogleReviewSync(clientId, reason = "scheduled") {
   });
 }
 
-export async function enqueueSms({ clientId, customerId, body, campaignId = null }) {
+export async function enqueueSms({ clientId, customerId, body, campaignId = null, jobId = null }) {
   if (!clientId || !customerId || !body) throw new Error("clientId, customerId and body are required");
   return getSmsQueue().add("deliver-sms", {
     clientId: String(clientId),
@@ -46,7 +46,7 @@ export async function enqueueSms({ clientId, customerId, body, campaignId = null
     body: String(body),
     campaignId: campaignId ? String(campaignId) : null
   }, {
-    jobId: `sms-${String(clientId)}-${String(customerId)}-${Date.now()}`
+    jobId: jobId || `sms-${String(clientId)}-${String(customerId)}-${Date.now()}`
   });
 }
 
