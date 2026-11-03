@@ -12,6 +12,7 @@ async function sendTwilioSms({ to, body }) {
   }
   const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
   const form = new URLSearchParams({ To: to, From: TWILIO_FROM_NUMBER, Body: body });
+  if (process.env.TWILIO_STATUS_CALLBACK_URL) form.set("StatusCallback", process.env.TWILIO_STATUS_CALLBACK_URL);
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
     method: "POST",
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
@@ -45,6 +46,7 @@ export async function deliverSmsJob(data) {
       direction: "outbound",
       body,
       status: "failed",
+      campaignId: campaignId || undefined,
       demo: true
     });
     return { skipped: policy.reason };
@@ -57,13 +59,19 @@ export async function deliverSmsJob(data) {
     direction: "outbound",
     body,
     status: "queued",
+    campaignId: campaignId || undefined,
     demo: false
   });
   try {
     const result = await sendTwilioSms({ to: customer.phone, body });
     activity.status = "sent";
     activity.providerId = result.sid;
+    activity.providerStatus = result.status || "queued";
     await activity.save();
+    if (campaignId) {
+      const { Campaign } = await import("../models.js");
+      await Campaign.updateOne({ _id: campaignId, clientId }, { $inc: { sentCount: 1 } });
+    }
     customer.lastContactedAt = new Date();
     await customer.save();
     return { sent: true, messageId: result.sid, campaignId: campaignId || null };
