@@ -85,6 +85,24 @@ describe("campaign CRUD", () => {
     expect((await Campaign.findById(created.body.item._id)).status).toBe("paused");
   });
 
+  test("requires explicit SMS enablement before campaign dispatch", async () => {
+    const campaign = await Campaign.create({ clientId: clientA._id, name: "Consent-based update", messageTemplate: "Hello {{firstName}}" });
+    const previous = process.env.SMS_DELIVERY_ENABLED;
+    delete process.env.SMS_DELIVERY_ENABLED;
+    const response = await agentA.post(`/api/campaigns/${campaign._id}/dispatch`).expect(409);
+    expect(response.body.error).toMatch(/SMS dispatch is disabled/);
+    if (previous !== undefined) process.env.SMS_DELIVERY_ENABLED = previous;
+  });
+
+  test("records documented consent only for a customer in the current tenant", async () => {
+    const own = await Customer.create({ clientId: clientA._id, firstName: "Own", phone: "+14155550121" });
+    const foreign = await Customer.create({ clientId: clientB._id, firstName: "Foreign", phone: "+14155550122" });
+    const accepted = await agentA.patch(`/api/customers/${own._id}/consent`).send({ consentStatus: "granted", consentSource: "Signed in-store consent form" }).expect(200);
+    expect(accepted.body.data.consentStatus).toBe("granted");
+    expect(accepted.body.data.consentAt).toBeTruthy();
+    await agentA.patch(`/api/customers/${foreign._id}/consent`).send({ consentStatus: "granted", consentSource: "Signed form" }).expect(404);
+  });
+
   test("cannot change a campaign owned by another workspace", async () => {
     const foreign = await Campaign.create({ clientId: clientB._id, name: "Private campaign" });
     await agentA.patch(`/api/campaigns/${foreign._id}/status`).send({ status: "paused" }).expect(404);
