@@ -21,6 +21,7 @@ export default function ReviewsPage() {
   const [rating, setRating] = useState("all");
   const [responseStatus, setResponseStatus] = useState("all");
   const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [savingReply, setSavingReply] = useState("");
@@ -45,6 +46,11 @@ export default function ReviewsPage() {
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }, [platform, rating, responseStatus, search]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => window.clearTimeout(timeout);
+  }, [searchInput]);
 
   useEffect(() => { setLoading(true); load(1); }, [load]);
 
@@ -88,7 +94,7 @@ export default function ReviewsPage() {
       {["google","yelp","facebook"].map(key => <article key={key} className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-sm text-slate-500">{platformName(key)} reviews</p><p className="mt-2 text-2xl font-bold text-slate-900">{platformCounts[key] || 0}</p></article>)}
     </div>
     <div className="flex flex-wrap gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-      <input aria-label="Search reviews" className="min-w-56 flex-1 rounded-lg border p-2.5 text-sm" placeholder="Search reviewer or review text…" value={search} onChange={e => setSearch(e.target.value)} />
+      <input aria-label="Search reviews" className="min-w-56 flex-1 rounded-lg border p-2.5 text-sm" placeholder="Search reviewer or review text…" value={searchInput} onChange={e => setSearchInput(e.target.value)} />
       <select aria-label="Filter platform" className="rounded-lg border p-2.5 text-sm" value={platform} onChange={e => setPlatform(e.target.value)}>{platforms.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>
       <select aria-label="Filter rating" className="rounded-lg border p-2.5 text-sm" value={rating} onChange={e => setRating(e.target.value)}><option value="all">Any rating</option>{[5,4,3,2,1].map(n => <option key={n} value={n}>{n} stars</option>)}</select>
       <select aria-label="Filter reply status" className="rounded-lg border p-2.5 text-sm" value={responseStatus} onChange={e => setResponseStatus(e.target.value)}><option value="all">All reply statuses</option><option value="unanswered">Unanswered</option><option value="answered">Answered</option></select>
