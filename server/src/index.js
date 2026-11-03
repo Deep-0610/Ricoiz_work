@@ -393,6 +393,8 @@ app.get("/api/integrations/status", auth, asyncHandler(async (req, res) => {
   integrations: [
     { key: "mongodb", name: "MongoDB", status: mongoose.connection.readyState === 1 ? "connected" : "disconnected" },
     { key: "google-business-profile", name: "Google Business Profile", status: connection?.status || "not_connected", accountEmail: connection?.externalAccountEmail || null, location: connection?.locationTitle || null },
+    { key: "yelp", name: "Yelp", status: "not_connected", note: "API access and partner approval required" },
+    { key: "facebook", name: "Facebook", status: "not_connected", note: "Meta app review and Page permissions required" },
     { key: "close-crm", name: "Close CRM", status: "demo_only" },
     { key: "n8n", name: "n8n automation", status: "demo_only" },
     { key: "stripe", name: "Stripe billing", status: "not_connected" },
