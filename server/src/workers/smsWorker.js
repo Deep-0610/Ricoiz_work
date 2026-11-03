@@ -36,6 +36,7 @@ export async function deliverSmsJob(data) {
     Customer.findOne({ _id: customerId, clientId })
   ]);
   if (!client || client.status === "paused") return { skipped: "workspace_inactive" };
+  if (!customer) return { skipped: "customer_not_found" };
   const policy = validateSmsRecipient(customer, client.timezone || "UTC");
   if (!policy.allowed) {
     await SmsActivity.create({
