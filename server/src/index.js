@@ -36,7 +36,11 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json", limit: 
   const syncSubscription = async subscription => {
     const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
     const clientId = subscription.metadata?.clientId;
-    const client = await Client.findOne({ $or: [{ ...(customerId ? { stripeCustomerId: customerId } : {}) }, ...(clientId ? [{ _id: clientId }] : [])] });
+    const tenantLookup = [];
+    if (customerId) tenantLookup.push({ stripeCustomerId: customerId });
+    if (clientId && mongoose.isValidObjectId(clientId)) tenantLookup.push({ _id: clientId });
+    if (!tenantLookup.length) return;
+    const client = await Client.findOne({ $or: tenantLookup });
     if (!client) return;
     const priceId = subscription.items?.data?.[0]?.price?.id || "";
     const configured = findConfiguredPrice(priceId);
