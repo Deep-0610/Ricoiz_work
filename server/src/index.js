@@ -28,6 +28,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); callback(new Error("Origin not allowed")); }, credentials: true }));
+const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 app.post("/api/webhooks/stripe", express.raw({ type: "application/json", limit: "1mb" }), asyncHandler(async (req, res) => {
   let event;
   try { event = verifyStripeWebhook(req.body, req.get("stripe-signature")); }
@@ -75,7 +76,6 @@ app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeader
 const authRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Too many sign-in attempts. Please try again in 15 minutes." } });
 const onboardingRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "Too many onboarding submissions. Please try again later." } });
 
-const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const tokenFor = user => jwt.sign({ sub: user._id.toString(), role: user.role, clientId: user.clientId?.toString() || null }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || "7d" });
 const auth = asyncHandler(async (req, res, next) => {
   const token = req.cookies?.ricoiz_session || (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
