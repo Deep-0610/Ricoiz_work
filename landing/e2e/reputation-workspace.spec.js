@@ -41,7 +41,7 @@ test("business user can sign in and reach the workspace", async ({ page }) => {
 test("review inbox filters reviews and publishes a Google reply", async ({ page }) => {
   const requestedUrls = [];
   let publishedBody;
-  await page.route("**/api/reviews?**", async route => {
+  await page.route("**/api/reviews**", async route => {
     requestedUrls.push(route.request().url());
     const url = new URL(route.request().url());
     const isUnanswered = url.searchParams.get("responseStatus") === "unanswered";
@@ -75,6 +75,6 @@ test("review inbox filters reviews and publishes a Google reply", async ({ page 
   await page.getByLabel("Google reply").fill("Thank you for sharing your feedback!");
   await page.getByRole("button", { name: "Publish Google reply" }).click();
 
-  await expect(page.getByRole("status")).toContainText("Reply published");
+  await expect(page.getByRole("status")).toContainText("Reply published to Google Business Profile.");
   expect(publishedBody).toEqual({ response: "Thank you for sharing your feedback!" });
 });
