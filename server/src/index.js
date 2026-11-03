@@ -267,6 +267,9 @@ app.post("/api/campaigns/:id/dispatch", auth, tenantGuard, asyncHandler(async (r
   if (process.env.SMS_DELIVERY_ENABLED !== "true") {
     return res.status(409).json({ success: false, error: "SMS dispatch is disabled. Configure Twilio and explicitly enable SMS_DELIVERY_ENABLED." });
   }
+  if (!process.env.TWILIO_WEBHOOK_BASE_URL || !process.env.TWILIO_STATUS_CALLBACK_URL) {
+    return res.status(503).json({ success: false, error: "Signed Twilio inbound and status callback URLs must be configured before dispatch." });
+  }
   const [campaign, client] = await Promise.all([
     Campaign.findOne({ _id: req.params.id, clientId }),
     Client.findOne({ _id: clientId, status: "active" }).select("businessName status").lean()
@@ -280,7 +283,9 @@ app.post("/api/campaigns/:id/dispatch", auth, tenantGuard, asyncHandler(async (r
   let queued = 0;
   const cursor = Customer.find({ clientId, consentStatus: "granted", consentAt: { $ne: null }, optedOutAt: null }).cursor();
   for await (const customer of cursor) {
-    const body = renderSmsTemplate(template, customer, client);
+    let body;
+    try { body = renderSmsTemplate(template, customer, client); }
+    catch (error) { return res.status(400).json({ success: false, error: error.message }); }
     if (!body || body.length > 1600) return res.status(400).json({ success: false, error: "Rendered SMS messages must contain 1–1600 characters" });
     await enqueueSms({
       clientId,
