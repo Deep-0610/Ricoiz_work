@@ -272,10 +272,16 @@ app.post("/api/campaigns/:id/dispatch", auth, tenantGuard, asyncHandler(async (r
   }
   const [campaign, client] = await Promise.all([
     Campaign.findOne({ _id: req.params.id, clientId }),
-    Client.findOne({ _id: clientId, status: "active" }).select("businessName status").lean()
+    Client.findOne({ _id: clientId, status: "active" }).select("businessName status smsFromNumber").lean()
   ]);
   if (!campaign) return res.status(404).json({ success: false, error: "Campaign not found" });
   if (!client) return res.status(409).json({ success: false, error: "Only active workspaces can dispatch SMS campaigns" });
+  if (!/^\\+[1-9]\\d{7,14}$/.test(String(client.smsFromNumber || ""))) {
+    return res.status(409).json({ success: false, error: "Configure a valid tenant-specific Twilio sender number before dispatch." });
+  }
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+    return res.status(503).json({ success: false, error: "Twilio credentials are not configured on the API service." });
+  }
   if (campaign.channel !== "sms") return res.status(400).json({ success: false, error: "Only SMS campaigns can be dispatched" });
   if (campaign.status === "active" || campaign.status === "completed") return res.status(409).json({ success: false, error: "This campaign has already been dispatched" });
   const template = String(campaign.messageTemplate || "").trim();
@@ -391,13 +397,17 @@ app.post("/api/webhooks/twilio/status", twilioWebhookAuth, asyncHandler(async (r
   const messageSid = String(req.body.MessageSid || "");
   const status = normalizeTwilioStatus(req.body.MessageStatus);
   if (!messageSid || !status) return res.status(400).json({ success: false, error: "A valid Twilio MessageSid and status are required" });
-  const activity = await SmsActivity.findOneAndUpdate(
-    { providerId: messageSid, direction: "outbound" },
-    { $set: { status, providerStatus: String(req.body.MessageStatus), providerErrorCode: req.body.ErrorCode ? String(req.body.ErrorCode) : undefined } },
-    { new: true }
-  );
+  const activity = await SmsActivity.findOne({ providerId: messageSid, direction: "outbound" });
   if (!activity) return res.status(404).json({ success: false, error: "SMS activity not found" });
-  if (status === "failed" && activity.campaignId) {
+  const wasFailed = activity.status === "failed";
+  const terminal = ["delivered", "failed"].includes(activity.status);
+  if (!terminal) {
+    activity.status = status;
+    activity.providerStatus = String(req.body.MessageStatus);
+    activity.providerErrorCode = req.body.ErrorCode ? String(req.body.ErrorCode) : undefined;
+    await activity.save();
+  }
+  if (status === "failed" && !wasFailed && activity.campaignId) {
     await Campaign.updateOne({ _id: activity.campaignId, clientId: activity.clientId }, { $inc: { failedCount: 1 } });
   }
   res.json({ success: true });
