@@ -71,6 +71,7 @@ app.post("/api/auth/register", authRateLimit, asyncHandler(async (req, res) => {
   if (await User.exists({ email })) return res.status(409).json({ error: "An account with this email already exists. Please sign in." });
   const client = await Client.create({
     businessName: parsed.data.businessName,
+    slug: `${parsed.data.businessName.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "business"}-${new mongoose.Types.ObjectId().toString().slice(-6)}`,
     ownerName: parsed.data.name,
     ownerEmail: email,
     city: parsed.data.city || "",
@@ -88,6 +89,55 @@ app.post("/api/auth/register", authRateLimit, asyncHandler(async (req, res) => {
   }
 }));
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
+
+app.get("/api/business/me", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const business = await Client.findById(clientId).select("businessName ownerName ownerEmail ownerPhone industry address city timezone googleReviewUrl publicReviewLinks slug status").lean();
+  if (!business) return res.status(404).json({ error: "Business profile not found" });
+  res.json({ success: true, data: business });
+}));
+
+app.put("/api/business/settings", auth, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const optionalUrl = z.string().trim().url().max(2048).or(z.literal("")).optional();
+  const parsed = z.object({
+    businessName: z.string().trim().min(2).max(120).optional(),
+    ownerPhone: z.string().trim().min(7).max(25).optional(),
+    industry: z.string().trim().max(100).optional(),
+    address: z.object({
+      line1: z.string().trim().max(160).optional(),
+      line2: z.string().trim().max(160).optional(),
+      city: z.string().trim().max(100).optional(),
+      region: z.string().trim().max(100).optional(),
+      postalCode: z.string().trim().max(20).optional(),
+      country: z.string().trim().max(2).optional()
+    }).partial().optional(),
+    publicReviewLinks: z.object({
+      google: optionalUrl,
+      yelp: optionalUrl,
+      facebook: optionalUrl
+    }).partial().optional()
+  }).strict().refine(value => Object.keys(value).length > 0).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: "Invalid business settings", details: parsed.error.flatten() });
+  const update = { ...parsed.data };
+  if (update.businessName) {
+    const suffix = String(clientId).slice(-6);
+    update.slug = `${update.businessName.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "business"}-${suffix}`;
+  }
+  const business = await Client.findOneAndUpdate({ _id: clientId }, { $set: update }, { new: true, runValidators: true })
+    .select("businessName ownerName ownerEmail ownerPhone industry address city timezone googleReviewUrl publicReviewLinks slug status").lean();
+  res.json({ success: true, data: business });
+}));
+
+app.get("/api/public/business/:slug", asyncHandler(async (req, res) => {
+  const business = await Client.findOne({ slug: String(req.params.slug).toLowerCase(), status: { $in: ["active", "pending"] } })
+    .select("businessName industry address city publicReviewLinks googleReviewUrl slug").lean();
+  if (!business) return res.status(404).json({ success: false, error: "Business review page not found" });
+  const links = { ...(business.publicReviewLinks || {}) };
+  if (!links.google && business.googleReviewUrl) links.google = business.googleReviewUrl;
+  res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+  res.json({ success: true, data: { name: business.businessName, industry: business.industry || "", address: business.address || { city: business.city || "" }, reviewLinks: links } });
+}));
 app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
 
 app.post("/api/onboarding", onboardingRateLimit, asyncHandler(async (req, res) => {
