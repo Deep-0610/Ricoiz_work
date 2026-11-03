@@ -69,6 +69,9 @@ const reviewSchema = new Schema({
   reviewedAt: { type: Date, default: Date.now },
   demo: { type: Boolean, default: true }
 }, opts);
+reviewSchema.index({ clientId: 1, externalId: 1, platform: 1 }, { unique: true, partialFilterExpression: { externalId: { $type: "string" } } });
+reviewSchema.index({ clientId: 1, reviewedAt: -1 });
+reviewSchema.index({ clientId: 1, platform: 1, rating: 1 });
 
 const campaignSchema = new Schema({
   clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true, index: true },
@@ -80,6 +83,7 @@ const campaignSchema = new Schema({
   messageTemplate: String,
   demo: { type: Boolean, default: true }
 }, opts);
+campaignSchema.index({ clientId: 1, status: 1, createdAt: -1 });
 
 const smsActivitySchema = new Schema({
   clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true, index: true },
@@ -90,6 +94,7 @@ const smsActivitySchema = new Schema({
   providerId: String,
   demo: { type: Boolean, default: true }
 }, opts);
+smsActivitySchema.index({ clientId: 1, status: 1, createdAt: -1 });
 
 const onboardingSchema = new Schema({
   businessName: { type: String, required: true },
