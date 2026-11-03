@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/models.js",
+    "check": "node --check src/index.js && node --check src/models.js && node --check src/queues/connection.js && node --check src/queues/index.js && node --check src/workers/index.js && node --check src/workers/reviewSyncWorker.js && node --check src/workers/smsWorker.js && node --check src/workers/smsPolicy.js",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
-    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch"
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "workers": "node src/workers/index.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -20,7 +21,9 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
     "zod": "^3.24.1",
-    "cookie-parser": "^1.4.7"
+    "cookie-parser": "^1.4.7",
+    "bullmq": "^5.58.5",
+    "ioredis": "^5.6.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.9",
