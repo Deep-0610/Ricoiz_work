@@ -22,7 +22,12 @@ Required worker environment:
 - `REDIS_URL`
 - `JWT_SECRET` (API runtime)
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_TOKEN_ENCRYPTION_KEY` for Google review sync
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` only when SMS delivery is intentionally enabled; also set `SMS_DELIVERY_ENABLED=true` to permit sends
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`
+- `TWILIO_WEBHOOK_BASE_URL` set to the public API origin (used to validate Twilio signatures)
+- `TWILIO_STATUS_CALLBACK_URL` set to `https://YOUR_API_HOST/api/webhooks/twilio/status`
+- Configure Twilio's inbound message webhook as `https://YOUR_API_HOST/api/webhooks/twilio/inbound`
+- Set each workspace's `smsFromNumber` to its Twilio inbound-capable E.164 number so inbound messages can be routed to the correct tenant
+- Set `SMS_DELIVERY_ENABLED=true` only after consent records, Twilio webhooks, and legal/compliance review are complete
 
 ## Review sync
 
@@ -32,7 +37,9 @@ The worker discovers connected Google Business Profile workspaces every four hou
 
 SMS jobs re-read the customer using both `_id` and `clientId` immediately before delivery. Delivery requires `consentStatus=granted`, a non-empty `consentAt`, no `optedOutAt`, a valid E.164 number, a workspace with `status=active`, and local time between 09:00 and 19:59. Invalid timezones fail closed. The queue does not send to customers with unknown consent.
 
-SMS sending is additionally hard-disabled unless `SMS_DELIVERY_ENABLED=true`; Twilio credentials alone cannot trigger delivery. No campaign route is wired to dispatch in this phase. This is intentional: Phase 3 adds campaign orchestration and opt-out webhooks. Do not enable Twilio credentials until consent capture, STOP handling and provider callbacks are operational and legally reviewed.
+SMS sending is hard-disabled unless `SMS_DELIVERY_ENABLED=true`; Twilio credentials alone cannot trigger delivery. Campaign dispatch queues only customers with recorded consent, and the worker re-checks consent, opt-out state, workspace status, phone format, and local sending window immediately before sending. Campaign queue jobs have deterministic IDs to prevent duplicate enqueues on repeat requests.
+
+Signed Twilio inbound webhooks process STOP-family keywords and persist opt-outs. START does not silently restore consent; fresh consent must be recorded through the authenticated customer consent endpoint. HELP receives a basic response. Signed status callbacks update the corresponding outbound SMS activity. Set `TWILIO_WEBHOOK_BASE_URL` to the exact public API origin and configure both Twilio webhook URLs. Do not enable SMS until the account, sender registration, consent language, local telecom rules (including applicable India TRAI/DLT requirements), and webhook configuration have been reviewed.
 
 ## Local verification
 
