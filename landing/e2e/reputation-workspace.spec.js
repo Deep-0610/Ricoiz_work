@@ -14,7 +14,7 @@ test("business user can sign in and reach the workspace", async ({ page }) => {
   await page.route("**/api/auth/login", route => route.fulfill({
     status: 200,
     contentType: "application/json",
-    headers: { "set-cookie": "token=e2e-session; Path=/; HttpOnly; SameSite=Lax" },
+    headers: { "set-cookie": "ricoiz_session=e2e-session; Path=/; HttpOnly; SameSite=Lax" },
     body: JSON.stringify({ success: true, user: { email: "owner@example.test" } }),
   }));
   await page.route("**/api/dashboard/overview", route => route.fulfill({
