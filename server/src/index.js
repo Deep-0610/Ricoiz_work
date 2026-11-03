@@ -158,32 +158,17 @@ app.get("/api/reviews", auth, asyncHandler(async (req, res) => {
   if (Number.isInteger(rating) && rating >= 1 && rating <= 5) filter.rating = rating;
   const search = String(req.query.search || "").trim().slice(0, 100);
   if (search) {
-    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\app.get("/api/reviews", auth, asyncHandler(async (req, res) => {
-  const clientId = requireClient(req, res); if (!clientId) return;
-  const page = Math.max(1, Number(req.query.page || 1));
-  const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
-  const [items, total] = await Promise.all([
-    Review.find({ clientId }).sort({ reviewedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-    Review.countDocuments({ clientId })
-  ]);
-  res.json({ items, page, limit, total, hasMore: page * limit < total });
-}));
-");
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     filter.$or = [{ author: new RegExp(escaped, "i") }, { text: new RegExp(escaped, "i") }];
   }
   const [items, total, platformCounts] = await Promise.all([
     Review.find(filter).sort({ reviewedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     Review.countDocuments(filter),
-    Review.aggregate([
-      { $match: { clientId } },
-      { $group: { _id: "$platform", count: { $sum: 1 } } }
-    ])
+    Review.aggregate([{ $match: { clientId } }, { $group: { _id: "$platform", count: { $sum: 1 } } }])
   ]);
-  res.json({
-    items, page, limit, total, hasMore: page * limit < total,
-    platformCounts: Object.fromEntries(platformCounts.map(item => [item._id, item.count]))
-  });
+  res.json({ items, page, limit, total, hasMore: page * limit < total, platformCounts: Object.fromEntries(platformCounts.map(item => [item._id, item.count])) });
 }));
+ 
 app.patch("/api/reviews/:id/response", auth, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ response: z.string().trim().min(1).max(5000), responseStatus: z.enum(["draft", "approved"]) }).safeParse(req.body);
