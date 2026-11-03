@@ -9,6 +9,7 @@ import rateLimit from "express-rate-limit";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import { tenantGuard } from "./middleware/tenantGuard.js";
 import { User, Client, Customer, Review, Campaign, SmsActivity, Onboarding, IntegrationConnection } from "./models.js";
 import { googleAuthorizationUrl, exchangeGoogleCode, encryptToken, googleUserInfo, googleAccessToken, listGoogleAccounts, listGoogleLocations, listGoogleReviews, publishGoogleReviewReply } from "./googleBusinessProfile.js";
 
@@ -40,7 +41,7 @@ const auth = asyncHandler(async (req, res, next) => {
     next();
   } catch { return res.status(401).json({ error: "Invalid or expired session" }); }
 });
-const clientScope = req => req.user.clientId || req.query.clientId || req.body?.clientId;
+const clientScope = req => req.tenantId || req.user?.clientId;
 const requireClient = (req, res) => {
   const id = String(clientScope(req) || "");
   if (!id || !mongoose.isValidObjectId(id)) { res.status(400).json({ error: "A valid workspace is required" }); return null; }
@@ -90,14 +91,14 @@ app.post("/api/auth/register", authRateLimit, asyncHandler(async (req, res) => {
 }));
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
 
-app.get("/api/business/me", auth, asyncHandler(async (req, res) => {
+app.get("/api/business/me", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const business = await Client.findById(clientId).select("businessName ownerName ownerEmail ownerPhone industry address city timezone googleReviewUrl publicReviewLinks slug status").lean();
   if (!business) return res.status(404).json({ error: "Business profile not found" });
   res.json({ success: true, data: business });
 }));
 
-app.put("/api/business/settings", auth, asyncHandler(async (req, res) => {
+app.put("/api/business/settings", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const optionalUrl = z.string().trim().url().max(2048).or(z.literal("")).optional();
   const parsed = z.object({
@@ -138,7 +139,7 @@ app.get("/api/public/business/:slug", asyncHandler(async (req, res) => {
   res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   res.json({ success: true, data: { name: business.businessName, industry: business.industry || "", address: business.address || { city: business.city || "" }, reviewLinks: links } });
 }));
-app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
+app.post("/api/auth/logout", auth, tenantGuard, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
 
 app.post("/api/onboarding", onboardingRateLimit, asyncHandler(async (req, res) => {
   const schema = z.object({
@@ -162,7 +163,7 @@ app.post("/api/onboarding", onboardingRateLimit, asyncHandler(async (req, res) =
   res.status(201).json({ ok: true, onboardingId: onboarding._id, status: onboarding.status, demo: onboarding.demo });
 }));
 
-app.get("/api/dashboard/overview", auth, asyncHandler(async (req, res) => {
+app.get("/api/dashboard/overview", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const [reviews, customers, campaigns, sms] = await Promise.all([
     Review.find({ clientId }).lean(), Customer.countDocuments({ clientId }),
@@ -172,32 +173,32 @@ app.get("/api/dashboard/overview", auth, asyncHandler(async (req, res) => {
   res.json({ metrics: { newReviews: reviews.length, averageRating, customers, campaigns, smsRequests: sms, repliesToReview: reviews.filter(r => r.responseStatus === "published").length }, demo: DEMO_MODE });
 }));
 
-app.get("/api/customers", auth, asyncHandler(async (req, res) => {
+app.get("/api/customers", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const page = Math.max(1, Number(req.query.page || 1)); const limit = Math.min(100, Math.max(1, Number(req.query.limit || 20)));
   const filter = { clientId }; if (req.query.search) filter.$or = [{ firstName: new RegExp(String(req.query.search).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") }, { phone: new RegExp(String(req.query.search), "i") }];
   const [items, total] = await Promise.all([Customer.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), Customer.countDocuments(filter)]);
   res.json({ items, page, limit, total });
 }));
-app.post("/api/customers", auth, asyncHandler(async (req, res) => {
+app.post("/api/customers", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ firstName: z.string().trim().min(1).max(80), lastName: z.string().max(80).optional(), phone: z.string().trim().min(7).max(25), email: z.string().email().optional(), consentStatus: z.enum(["unknown", "granted", "revoked"]).default("unknown") }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid customer details", details: parsed.error.flatten() });
   const item = await Customer.create({ ...parsed.data, clientId });
   res.status(201).json({ item });
 }));
-app.patch("/api/customers/:id", auth, asyncHandler(async (req, res) => {
+app.patch("/api/customers/:id", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const item = await Customer.findOneAndUpdate({ _id: req.params.id, clientId }, { $set: req.body }, { new: true, runValidators: true });
   if (!item) return res.status(404).json({ error: "Customer not found" }); res.json({ item });
 }));
-app.delete("/api/customers/:id", auth, asyncHandler(async (req, res) => {
+app.delete("/api/customers/:id", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const item = await Customer.findOneAndDelete({ _id: req.params.id, clientId });
   if (!item) return res.status(404).json({ error: "Customer not found" }); res.json({ ok: true });
 }));
 
-app.get("/api/reviews", auth, asyncHandler(async (req, res) => {
+app.get("/api/reviews", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 50)));
@@ -222,7 +223,7 @@ app.get("/api/reviews", auth, asyncHandler(async (req, res) => {
   res.json({ items, page, limit, total, hasMore: page * limit < total, platformCounts: Object.fromEntries(platformCounts.map(item => [item._id, item.count])) });
 }));
  
-app.patch("/api/reviews/:id/response", auth, asyncHandler(async (req, res) => {
+app.patch("/api/reviews/:id/response", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ response: z.string().trim().min(1).max(5000), responseStatus: z.enum(["draft", "approved"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid response" });
@@ -230,18 +231,18 @@ app.patch("/api/reviews/:id/response", auth, asyncHandler(async (req, res) => {
   if (!item) return res.status(404).json({ error: "Review not found" }); res.json({ item, demo: DEMO_MODE });
 }));
 
-app.get("/api/campaigns", auth, asyncHandler(async (req, res) => {
+app.get("/api/campaigns", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   res.json({ items: await Campaign.find({ clientId }).sort({ createdAt: -1 }).lean() });
 }));
-app.post("/api/campaigns", auth, asyncHandler(async (req, res) => {
+app.post("/api/campaigns", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ name: z.string().trim().min(2).max(100), channel: z.enum(["sms", "email"]).default("sms"), messageTemplate: z.string().max(2000).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid campaign details" });
   const item = await Campaign.create({ ...parsed.data, clientId, status: "draft", demo: DEMO_MODE });
   res.status(201).json({ item });
 }));
-app.patch("/api/campaigns/:id/status", auth, asyncHandler(async (req, res) => {
+app.patch("/api/campaigns/:id/status", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ status: z.enum(["draft", "scheduled", "active", "paused", "completed"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid campaign status" });
@@ -252,13 +253,13 @@ app.patch("/api/campaigns/:id/status", auth, asyncHandler(async (req, res) => {
 
 
 
-app.get("/api/settings/intake-phone", auth, asyncHandler(async (req, res) => {
+app.get("/api/settings/intake-phone", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const client = await Client.findById(clientId).select("intakePhone").lean();
   res.json({ intakePhone: client?.intakePhone || null });
 }));
 
-app.patch("/api/settings/intake-phone", auth, asyncHandler(async (req, res) => {
+app.patch("/api/settings/intake-phone", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ intakePhone: z.string().trim().min(7).max(25) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "A valid Close inbound phone number is required" });
@@ -333,7 +334,7 @@ app.post("/api/automation/reviews/customer-add-via-text", n8nAutomationAuth, asy
   res.status(201).json({ ok: true, customerId: String(customer._id), consentStatus: customer.consentStatus, dripEligible: false, message: "Customer saved. SMS remains blocked until documented consent is recorded." });
 }));
 
-app.get("/api/integrations/google-business-profile/connect", auth, asyncHandler(async (req, res) => {
+app.get("/api/integrations/google-business-profile/connect", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const state = jwt.sign({ sub: req.user._id.toString(), clientId }, process.env.JWT_SECRET, { expiresIn: "10m", audience: "google-business-profile-oauth" });
   res.json({ authorizationUrl: googleAuthorizationUrl(state) });
@@ -363,14 +364,14 @@ app.get("/api/integrations/google-business-profile/callback", asyncHandler(async
   );
   res.redirect(`${frontend}/dashboard/settings?google=connected`);
 }));
-app.get("/api/integrations/google-business-profile/accounts", auth, asyncHandler(async (req, res) => {
+app.get("/api/integrations/google-business-profile/accounts", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const connection = await IntegrationConnection.findOne({ clientId, provider: "google-business-profile", status: "connected" });
   if (!connection) return res.status(404).json({ error: "Google Business Profile is not connected" });
   const accessToken = await googleAccessToken(connection, doc => doc.save());
   res.json(await listGoogleAccounts(accessToken));
 }));
-app.get("/api/integrations/google-business-profile/locations", auth, asyncHandler(async (req, res) => {
+app.get("/api/integrations/google-business-profile/locations", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const account = String(req.query.account || "");
   if (!/^accounts\/[A-Za-z0-9_-]+$/.test(account)) return res.status(400).json({ error: "A valid Google account resource name is required" });
@@ -379,7 +380,7 @@ app.get("/api/integrations/google-business-profile/locations", auth, asyncHandle
   const accessToken = await googleAccessToken(connection, doc => doc.save());
   res.json(await listGoogleLocations(accessToken, account));
 }));
-app.post("/api/integrations/google-business-profile/location", auth, asyncHandler(async (req, res) => {
+app.post("/api/integrations/google-business-profile/location", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ accountName: z.string().regex(/^accounts\/[A-Za-z0-9_-]+$/), locationName: z.string().regex(/^accounts\/[A-Za-z0-9_-]+\/locations\/[A-Za-z0-9_-]+$/), locationTitle: z.string().trim().min(1).max(200) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Valid Google account and location are required" });
@@ -387,7 +388,7 @@ app.post("/api/integrations/google-business-profile/location", auth, asyncHandle
   if (!connection) return res.status(404).json({ error: "Google Business Profile is not connected" });
   res.json({ ok: true, locationName: connection.locationName, locationTitle: connection.locationTitle });
 }));
-app.post("/api/integrations/google-business-profile/sync-reviews", auth, asyncHandler(async (req, res) => {
+app.post("/api/integrations/google-business-profile/sync-reviews", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const connection = await IntegrationConnection.findOne({ clientId, provider: "google-business-profile", status: "connected" });
   if (!connection?.locationName) return res.status(409).json({ error: "Connect Google and select a verified business location first" });
@@ -410,7 +411,7 @@ app.post("/api/integrations/google-business-profile/sync-reviews", auth, asyncHa
   } while (pageToken && pages < 10);
   res.json({ ok: true, synced, pages, hasMore: Boolean(pageToken) });
 }));
-app.put("/api/integrations/google-business-profile/reviews/:reviewId/reply", auth, asyncHandler(async (req, res) => {
+app.put("/api/integrations/google-business-profile/reviews/:reviewId/reply", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const parsed = z.object({ response: z.string().trim().min(1).max(4096) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "A review response is required" });
@@ -425,7 +426,7 @@ app.put("/api/integrations/google-business-profile/reviews/:reviewId/reply", aut
   res.json({ ok: true, review, google: result });
 }));
 
-app.get("/api/integrations/status", auth, asyncHandler(async (req, res) => {
+app.get("/api/integrations/status", auth, tenantGuard, asyncHandler(async (req, res) => {
   const connection = await IntegrationConnection.findOne({ clientId: req.user.clientId, provider: "google-business-profile" }).lean();
   res.json({
   integrations: [
@@ -475,4 +476,8 @@ async function start() {
   }
   app.listen(PORT, () => console.log(`Ricoiz MongoDB API listening on :${PORT} (demoMode=${DEMO_MODE})`));
 }
-start().catch(error => { console.error("API startup failed:", error); process.exit(1); });
+export { app, start };
+
+if (process.env.NODE_ENV !== "test") {
+  start().catch(error => { console.error("API startup failed:", error); process.exit(1); });
+}
