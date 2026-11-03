@@ -61,7 +61,7 @@ app.post("/api/webhooks/stripe", express.raw({ type: "application/json", limit: 
     const session = event.data.object;
     const subscriptionId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
     if (subscriptionId) await syncSubscription(await getStripe().subscriptions.retrieve(subscriptionId));
-  } else if (event.type === "invoice.payment_succeeded" || event.type === "invoice.payment_failed") {
+  } else if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded" || event.type === "invoice.payment_failed") {
     const invoice = event.data.object;
     const subscriptionId = invoice.subscription || invoice.parent?.subscription_details?.subscription;
     if (subscriptionId) await syncSubscription(await getStripe().subscriptions.retrieve(typeof subscriptionId === "string" ? subscriptionId : subscriptionId.id));
