@@ -87,9 +87,9 @@ export async function syncYelpReviewsForTenant(clientId) {
 export async function startReviewSyncWorker() {
   const queue = getReviewQueue();
   await queue.upsertJobScheduler(
-    "connected-google-workspaces-every-four-hours",
+    "connected-review-platforms-every-four-hours",
     { every: 4 * 60 * 60 * 1000 },
-    { name: "discover-connected-google-workspaces", data: {} }
+    { name: "discover-connected-review-platforms", data: {} }
   );
 
   const worker = new Worker(QUEUE_NAMES.reviews, async job => {
