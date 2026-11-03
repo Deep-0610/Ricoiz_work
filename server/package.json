@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/models.js"
+    "check": "node --check src/index.js && node --check src/models.js",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -21,6 +23,9 @@
     "cookie-parser": "^1.4.7"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "nodemon": "^3.1.9",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0",
+    "mongodb-memory-server": "^10.1.4"
   }
 }
