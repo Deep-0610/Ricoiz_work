@@ -2,6 +2,7 @@ import { Worker } from "bullmq";
 import mongoose from "mongoose";
 import { Client, IntegrationConnection, Review } from "../models.js";
 import { googleAccessToken, listGoogleReviews } from "../googleBusinessProfile.js";
+import { listYelpReviews } from "../yelpFusion.js";
 import { QUEUE_NAMES, getReviewQueue } from "../queues/index.js";
 import { getRedisConnection } from "../queues/connection.js";
 
@@ -49,6 +50,40 @@ export async function syncGoogleReviewsForTenant(clientId) {
   return { synced, pages, hasMore: Boolean(pageToken) };
 }
 
+
+export async function syncYelpReviewsForTenant(clientId) {
+  if (!mongoose.isValidObjectId(String(clientId))) throw new Error("Invalid tenant id");
+  const [client, connection] = await Promise.all([
+    Client.findById(clientId).select("_id status").lean(),
+    IntegrationConnection.findOne({ clientId, provider: "yelp", status: "connected" })
+  ]);
+  if (!client || client.status !== "active") return { skipped: "workspace_inactive", synced: 0 };
+  const businessId = connection?.metadata?.yelpBusinessId;
+  if (!businessId) return { skipped: "yelp_business_id_not_configured", synced: 0 };
+  const payload = await listYelpReviews(businessId);
+  let synced = 0;
+  for (const item of payload.reviews || []) {
+    if (!item.id || !Number.isFinite(Number(item.rating)) || Number(item.rating) < 1 || Number(item.rating) > 5) continue;
+    await Review.findOneAndUpdate(
+      { clientId, externalId: item.id, platform: "yelp" },
+      { $set: {
+        externalId: item.id,
+        platform: "yelp",
+        rating: Number(item.rating),
+        author: item.user?.name || "Yelp user",
+        text: item.text || "",
+        response: "",
+        responseStatus: "not_started",
+        reviewedAt: item.time_created ? new Date(item.time_created) : new Date(),
+        demo: false
+      } },
+      { upsert: true, new: true, runValidators: true }
+    );
+    synced += 1;
+  }
+  return { synced, pages: 1, hasMore: false, limitation: "Yelp Fusion public review endpoint returns a limited recent-review sample; full review access requires Yelp partner approval." };
+}
+
 export async function startReviewSyncWorker() {
   const queue = getReviewQueue();
   await queue.upsertJobScheduler(
@@ -60,20 +95,21 @@ export async function startReviewSyncWorker() {
   const worker = new Worker(QUEUE_NAMES.reviews, async job => {
     if (job.name === "discover-connected-google-workspaces") {
       const connections = await IntegrationConnection.find({
-        provider: "google-business-profile",
-        status: "connected",
-        locationName: { $type: "string", $ne: "" }
-      }).select("clientId").lean();
-      const queued = await Promise.all(connections.map(item => queue.add(
-        "sync-google-reviews",
+        provider: { $in: ["google-business-profile", "yelp"] },
+        status: "connected"
+      }).select("clientId provider locationName metadata").lean();
+      const eligible = connections.filter(item => item.provider === "yelp"
+        ? Boolean(item.metadata?.yelpBusinessId)
+        : Boolean(item.locationName));
+      const queued = await Promise.all(eligible.map(item => queue.add(
+        item.provider === "yelp" ? "sync-yelp-reviews" : "sync-google-reviews",
         { clientId: String(item.clientId), reason: "four-hour-schedule" },
-        { jobId: `scheduled-google-${String(item.clientId)}-${Math.floor(Date.now() / (4 * 60 * 60 * 1000))}` }
+        { jobId: `scheduled-${item.provider}-${String(item.clientId)}-${Math.floor(Date.now() / (4 * 60 * 60 * 1000))}` }
       )));
       return { workspacesQueued: queued.length };
     }
-    if (job.name === "sync-google-reviews") {
-      return syncGoogleReviewsForTenant(job.data.clientId);
-    }
+    if (job.name === "sync-google-reviews") return syncGoogleReviewsForTenant(job.data.clientId);
+    if (job.name === "sync-yelp-reviews") return syncYelpReviewsForTenant(job.data.clientId);
     throw new Error(`Unsupported review job: ${job.name}`);
   }, { connection: getRedisConnection(), concurrency: 5, limiter: { max: 20, duration: 60_000 } });
 
