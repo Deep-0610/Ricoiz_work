@@ -22,7 +22,7 @@ Required worker environment:
 - `REDIS_URL`
 - `JWT_SECRET` (API runtime)
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_TOKEN_ENCRYPTION_KEY` for Google review sync
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`
 - `TWILIO_WEBHOOK_BASE_URL` set to the public API origin (used to validate Twilio signatures)
 - `TWILIO_STATUS_CALLBACK_URL` set to `https://YOUR_API_HOST/api/webhooks/twilio/status`
 - Configure Twilio's inbound message webhook as `https://YOUR_API_HOST/api/webhooks/twilio/inbound`
