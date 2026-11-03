@@ -13,7 +13,10 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { tenantGuard } from "./middleware/tenantGuard.js";
 import { User, Client, Customer, Review, Campaign, SmsActivity, Onboarding, IntegrationConnection } from "./models.js";
-import { googleAuthorizationUrl, exchangeGoogleCode, encryptToken, googleUserInfo, googleAccessToken, listGoogleAccounts, listGoogleLocations, listGoogleReviews, publishGoogleReviewReply } from "./googleBusinessProfile.js";
+import { googleAuthorizationUrl, exchangeGoogleCode, encryptToken, decryptToken, googleUserInfo, googleAccessToken, listGoogleAccounts, listGoogleLocations, listGoogleReviews, publishGoogleReviewReply } from "./googleBusinessProfile.js";
+import { getYelpBusiness } from "./yelpFusion.js";
+import { metaAuthorizationUrl, exchangeMetaCode, listManagedFacebookPages, getFacebookPage } from "./metaGraph.js";
+import { syncYelpReviewsForTenant } from "./workers/reviewSyncWorker.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
@@ -568,14 +571,118 @@ app.put("/api/integrations/google-business-profile/reviews/:reviewId/reply", aut
   res.json({ ok: true, review, google: result });
 }));
 
+
+app.post("/api/integrations/yelp/connect", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const parsed = z.object({ businessId: z.string().trim().min(3).max(200).regex(/^[A-Za-z0-9_-]+$/) }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: "A valid Yelp business ID is required" });
+  const business = await getYelpBusiness(parsed.data.businessId);
+  const connection = await IntegrationConnection.findOneAndUpdate(
+    { clientId, provider: "yelp" },
+    { $set: {
+      status: "connected",
+      externalAccountName: business.name || parsed.data.businessId,
+      metadata: { yelpBusinessId: parsed.data.businessId, businessUrl: business.url || "", rating: business.rating ?? null, reviewCount: business.review_count ?? null },
+      connectedAt: new Date()
+    } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  res.json({ success: true, data: { provider: "yelp", status: connection.status, businessName: connection.externalAccountName, rating: business.rating ?? null, reviewCount: business.review_count ?? null, reviewAccess: "limited_public_sample" } });
+}));
+
+app.post("/api/integrations/yelp/sync-reviews", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const result = await syncYelpReviewsForTenant(clientId);
+  if (result.skipped) return res.status(409).json({ success: false, error: result.skipped });
+  res.json({ success: true, data: result });
+}));
+
+app.get("/api/integrations/meta-facebook/connect", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const state = jwt.sign({ sub: req.user._id.toString(), clientId }, process.env.JWT_SECRET, { expiresIn: "10m", audience: "meta-facebook-oauth" });
+  res.json({ authorizationUrl: metaAuthorizationUrl(state) });
+}));
+
+app.get("/api/integrations/meta-facebook/callback", asyncHandler(async (req, res) => {
+  const frontend = allowedOrigins[0] || "http://localhost:3000";
+  if (req.query.error) return res.redirect(`${frontend}/dashboard/settings?facebook=denied`);
+  const parsed = z.object({ code: z.string().min(1), state: z.string().min(1) }).safeParse(req.query);
+  if (!parsed.success) return res.status(400).send("Invalid Meta OAuth callback");
+  let state;
+  try { state = jwt.verify(parsed.data.state, process.env.JWT_SECRET, { audience: "meta-facebook-oauth" }); }
+  catch { return res.status(400).send("Meta OAuth state is invalid or expired"); }
+  const token = await exchangeMetaCode(parsed.data.code);
+  await IntegrationConnection.findOneAndUpdate(
+    { clientId: state.clientId, provider: "meta-facebook" },
+    { $set: {
+      status: "connected",
+      accessTokenEncrypted: encryptToken(token.access_token),
+      tokenExpiresAt: token.expires_in ? new Date(Date.now() + token.expires_in * 1000) : null,
+      scopes: ["pages_show_list", "pages_read_engagement", "pages_read_user_content"],
+      metadata: { userTokenPendingPageSelection: true },
+      connectedAt: new Date()
+    } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  res.redirect(`${frontend}/dashboard/settings?facebook=authorized`);
+}));
+
+app.get("/api/integrations/meta-facebook/pages", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const connection = await IntegrationConnection.findOne({ clientId, provider: "meta-facebook", status: "connected" });
+  if (!connection?.accessTokenEncrypted) return res.status(404).json({ error: "Connect Meta and authorize Page access first" });
+  const pages = await listManagedFacebookPages(decryptToken(connection.accessTokenEncrypted));
+  res.json({ data: (pages.data || []).map(page => ({ id: page.id, name: page.name, tasks: page.tasks || [] })) });
+}));
+
+app.post("/api/integrations/meta-facebook/page", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const parsed = z.object({ pageId: z.string().trim().min(1).max(100) }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "A valid Facebook Page ID is required" });
+  const connection = await IntegrationConnection.findOne({ clientId, provider: "meta-facebook", status: "connected" });
+  if (!connection?.accessTokenEncrypted) return res.status(404).json({ error: "Meta authorization is required" });
+  const pages = await listManagedFacebookPages(decryptToken(connection.accessTokenEncrypted));
+  const selected = (pages.data || []).find(page => page.id === parsed.data.pageId && page.access_token);
+  if (!selected) return res.status(403).json({ error: "The authorized account does not manage this Page or did not grant a Page token" });
+  const details = await getFacebookPage(selected.id, selected.access_token);
+  connection.accessTokenEncrypted = encryptToken(selected.access_token);
+  connection.externalAccountName = details.name || selected.name;
+  connection.externalAccountEmail = "";
+  connection.metadata = {
+    pageId: details.id,
+    pageName: details.name || selected.name,
+    pageUrl: details.link || "",
+    reviewSyncSupported: false,
+    limitation: "Meta Graph API v22.0 and later removed Page ratings/recommendations endpoints."
+  };
+  connection.scopes = ["pages_show_list", "pages_read_engagement", "pages_read_user_content"];
+  await connection.save();
+  res.json({ success: true, data: { pageId: details.id, pageName: connection.externalAccountName, reviewSyncSupported: false, limitation: connection.metadata.limitation } });
+}));
+
+app.post("/api/integrations/meta-facebook/sync-reviews", auth, tenantGuard, asyncHandler(async (req, res) => {
+  const clientId = requireClient(req, res); if (!clientId) return;
+  const connection = await IntegrationConnection.findOne({ clientId, provider: "meta-facebook", status: "connected" });
+  if (!connection?.metadata?.pageId) return res.status(409).json({ error: "Connect Meta and select a managed Page first" });
+  return res.status(501).json({
+    success: false,
+    code: "META_PAGE_REVIEWS_UNAVAILABLE",
+    error: "Meta Graph API v22.0+ no longer exposes Page ratings/recommendations for review aggregation. The Page is connected, but review ingestion is unavailable through this API."
+  });
+}));
+
 app.get("/api/integrations/status", auth, tenantGuard, asyncHandler(async (req, res) => {
-  const connection = await IntegrationConnection.findOne({ clientId: req.user.clientId, provider: "google-business-profile" }).lean();
+  const connections = await IntegrationConnection.find({ clientId: req.user.clientId, provider: { $in: ["google-business-profile", "yelp", "meta-facebook"] } }).lean();
+  const byProvider = Object.fromEntries(connections.map(item => [item.provider, item]));
+  const google = byProvider["google-business-profile"];
+  const yelp = byProvider.yelp;
+  const facebook = byProvider["meta-facebook"];
   res.json({
   integrations: [
     { key: "mongodb", name: "MongoDB", status: mongoose.connection.readyState === 1 ? "connected" : "disconnected" },
-    { key: "google-business-profile", name: "Google Business Profile", status: connection?.status || "not_connected", accountEmail: connection?.externalAccountEmail || null, location: connection?.locationTitle || null },
-    { key: "yelp", name: "Yelp", status: "not_connected", note: "API access and partner approval required" },
-    { key: "facebook", name: "Facebook", status: "not_connected", note: "Meta app review and Page permissions required" },
+    { key: "google-business-profile", name: "Google Business Profile", status: google?.status || "not_connected", accountEmail: google?.externalAccountEmail || null, location: google?.locationTitle || null },
+    { key: "yelp", name: "Yelp", status: yelp?.status || "not_connected", businessName: yelp?.externalAccountName || null, reviewAccess: yelp ? "limited_public_sample" : "not_connected", note: yelp ? "Public Fusion API sample only; full review access requires Yelp partner approval." : "Configure YELP_FUSION_API_KEY and connect a Yelp business ID." },
+    { key: "facebook", name: "Facebook", status: facebook?.status || "not_connected", pageName: facebook?.externalAccountName || null, reviewSyncSupported: false, note: facebook?.metadata?.limitation || "Meta Page connection requires app review and Page permissions; Page review endpoints are no longer available in Graph API v22+." },
     { key: "close-crm", name: "Close CRM", status: "demo_only" },
     { key: "n8n", name: "n8n automation", status: "demo_only" },
     { key: "stripe", name: "Stripe billing", status: "not_connected" },
