@@ -23,6 +23,7 @@ jobs:
         with:
           node-version: 20
       - run: npm install
+      - run: npm install --no-save @playwright/test
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
         env:
