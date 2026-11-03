@@ -38,6 +38,14 @@ const clientSchema = new Schema({
   timezone: { type: String, default: "Asia/Kolkata" },
   googleReviewUrl: String,
   status: { type: String, enum: ["demo", "pending", "active", "paused"], default: "demo" },
+  stripeCustomerId: { type: String, sparse: true, unique: true },
+  stripeSubscriptionId: { type: String, sparse: true, unique: true },
+  billingPlan: { type: String, enum: ["free", "starter", "growth", "scale"], default: "free" },
+  billingInterval: { type: String, enum: ["month", "year"] },
+  billingStatus: { type: String, enum: ["inactive", "trialing", "active", "past_due", "canceled", "unpaid", "incomplete", "paused"], default: "inactive" },
+  billingPriceId: String,
+  billingCurrentPeriodEnd: Date,
+  billingCancelAtPeriodEnd: { type: Boolean, default: false },
   demo: { type: Boolean, default: true }
 }, opts);
 clientSchema.index({ intakePhone: 1 }, { unique: true, sparse: true });
@@ -147,3 +155,11 @@ integrationConnectionSchema.index({ clientId: 1, provider: 1 }, { unique: true }
 
 export const IntegrationConnection = models.IntegrationConnection || model("IntegrationConnection", integrationConnectionSchema);
 export const Onboarding = models.Onboarding || model("Onboarding", onboardingSchema);
+
+
+const stripeWebhookEventSchema = new Schema({
+  eventId: { type: String, required: true, unique: true },
+  type: { type: String, required: true },
+  processedAt: { type: Date, default: Date.now }
+}, opts);
+export const StripeWebhookEvent = models.StripeWebhookEvent || model("StripeWebhookEvent", stripeWebhookEventSchema);
