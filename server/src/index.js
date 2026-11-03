@@ -9,6 +9,7 @@ import rateLimit from "express-rate-limit";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import { tenantGuard } from "./middleware/tenantGuard.js";
 import { User, Client, Customer, Review, Campaign, SmsActivity, Onboarding, IntegrationConnection } from "./models.js";
 import { googleAuthorizationUrl, exchangeGoogleCode, encryptToken, googleUserInfo, googleAccessToken, listGoogleAccounts, listGoogleLocations, listGoogleReviews, publishGoogleReviewReply } from "./googleBusinessProfile.js";
 
@@ -40,7 +41,7 @@ const auth = asyncHandler(async (req, res, next) => {
     next();
   } catch { return res.status(401).json({ error: "Invalid or expired session" }); }
 });
-const clientScope = req => req.user.clientId || req.query.clientId || req.body?.clientId;
+const clientScope = req => req.tenantId || req.user?.clientId;
 const requireClient = (req, res) => {
   const id = String(clientScope(req) || "");
   if (!id || !mongoose.isValidObjectId(id)) { res.status(400).json({ error: "A valid workspace is required" }); return null; }
@@ -90,7 +91,7 @@ app.post("/api/auth/register", authRateLimit, asyncHandler(async (req, res) => {
 }));
 app.get("/api/auth/me", auth, (req, res) => res.json({ user: req.user }));
 
-app.get("/api/business/me", auth, asyncHandler(async (req, res) => {
+app.get("/api/business/me", auth, tenantGuard, asyncHandler(async (req, res) => {
   const clientId = requireClient(req, res); if (!clientId) return;
   const business = await Client.findById(clientId).select("businessName ownerName ownerEmail ownerPhone industry address city timezone googleReviewUrl publicReviewLinks slug status").lean();
   if (!business) return res.status(404).json({ error: "Business profile not found" });
@@ -138,7 +139,7 @@ app.get("/api/public/business/:slug", asyncHandler(async (req, res) => {
   res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   res.json({ success: true, data: { name: business.businessName, industry: business.industry || "", address: business.address || { city: business.city || "" }, reviewLinks: links } });
 }));
-app.post("/api/auth/logout", auth, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
+app.post("/api/auth/logout", auth, tenantGuard, (_req, res) => { res.clearCookie("ricoiz_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" }); res.json({ ok: true }); });
 
 app.post("/api/onboarding", onboardingRateLimit, asyncHandler(async (req, res) => {
   const schema = z.object({
@@ -475,4 +476,8 @@ async function start() {
   }
   app.listen(PORT, () => console.log(`Ricoiz MongoDB API listening on :${PORT} (demoMode=${DEMO_MODE})`));
 }
-start().catch(error => { console.error("API startup failed:", error); process.exit(1); });
+export { app, start };
+
+if (process.env.NODE_ENV !== "test") {
+  start().catch(error => { console.error("API startup failed:", error); process.exit(1); });
+}
