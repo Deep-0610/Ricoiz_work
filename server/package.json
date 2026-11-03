@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/models.js && node --check src/queues/connection.js && node --check src/queues/index.js && node --check src/workers/index.js && node --check src/workers/reviewSyncWorker.js && node --check src/workers/smsWorker.js && node --check src/workers/smsPolicy.js && node --check src/smsCompliance.js",
+    "check": "node --check src/index.js && node --check src/models.js && node --check src/queues/connection.js && node --check src/queues/index.js && node --check src/workers/index.js && node --check src/workers/reviewSyncWorker.js && node --check src/workers/smsWorker.js && node --check src/workers/smsPolicy.js && node --check src/smsCompliance.js && node --check src/yelpFusion.js && node --check src/metaGraph.js",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
     "workers": "node src/workers/index.js"
