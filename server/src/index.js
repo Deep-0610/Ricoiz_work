@@ -384,7 +384,8 @@ app.post("/api/campaigns/:id/dispatch", auth, tenantGuard, asyncHandler(async (r
   const smsLimit = getPlanLimits(effectivePlan).monthlySms;
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
   const smsUsed = await SmsActivity.countDocuments({ clientId, direction: "outbound", createdAt: { $gte: monthStart }, status: { $in: ["queued", "sent", "delivered"] } });
-  if (smsLimit <= smsUsed) return res.status(409).json({ success: false, code: "SMS_QUOTA_REACHED", error: "Your plan's monthly SMS allowance has been reached. Upgrade to continue sending." });
+  const eligibleRecipients = await Customer.countDocuments({ clientId, consentStatus: "granted", consentAt: { $ne: null }, optedOutAt: null });
+  if (smsLimit <= smsUsed || smsUsed + eligibleRecipients > smsLimit) return res.status(409).json({ success: false, code: "SMS_QUOTA_REACHED", error: "Your plan does not have enough remaining SMS quota for this campaign. Upgrade to continue sending." });
   let queued = 0;
   const cursor = Customer.find({ clientId, consentStatus: "granted", consentAt: { $ne: null }, optedOutAt: null }).cursor();
   for await (const customer of cursor) {
