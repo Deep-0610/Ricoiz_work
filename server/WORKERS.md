@@ -22,6 +22,8 @@ Required worker environment:
 - `REDIS_URL`
 - `JWT_SECRET` (API runtime)
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_TOKEN_ENCRYPTION_KEY` for Google review sync
+- `YELP_FUSION_API_KEY` for Yelp public Fusion API access
+- `META_APP_ID`, `META_APP_SECRET`, `META_REDIRECT_URI`, and optional `META_GRAPH_API_VERSION` (defaults to `v26.0`) for Meta Page authorization
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`
 - `TWILIO_WEBHOOK_BASE_URL` set to the public API origin (used to validate Twilio signatures)
 - `TWILIO_STATUS_CALLBACK_URL` set to `https://YOUR_API_HOST/api/webhooks/twilio/status`
@@ -31,7 +33,13 @@ Required worker environment:
 
 ## Review sync
 
-The worker discovers connected Google Business Profile workspaces every four hours and queues a tenant-scoped sync job. Each review is upserted by `clientId + platform + externalId`, so retries do not create duplicate reviews. A missing Google connection/location is a safe skip.
+The worker discovers connected Google Business Profile and Yelp workspaces every four hours and queues tenant-scoped sync jobs. Each review is upserted by `clientId + platform + externalId`, so retries do not create duplicate reviews. A missing connection or provider identifier is a safe skip.
+
+### Yelp Fusion
+Connect a Yelp business with `POST /api/integrations/yelp/connect` and body `{"businessId":"<Yelp business ID>"}`. The API verifies the business with Yelp before saving the ID to that tenant. Manual sync: `POST /api/integrations/yelp/sync-reviews`. The public Fusion reviews endpoint exposes only a small recent sample (up to three reviews), not a full review archive or reply capability. Full owner review management and responding require Yelp's separate partner/Respond-to-Reviews access and approval. Do not describe the public Fusion connector as full review sync.
+
+### Meta / Facebook Pages
+Start authorization at `GET /api/integrations/meta-facebook/connect`, then choose a managed Page using `GET /api/integrations/meta-facebook/pages` and `POST /api/integrations/meta-facebook/page` with `{"pageId":"<Page ID>"}`. Page tokens are encrypted at rest. The app needs Meta app configuration, review/approval for required Page permissions, and a Page administered by the authorizing user. Meta removed Page ratings/recommendations endpoints in Graph API v22.0+, so the connector can securely authorize and identify a Page but cannot ingest Facebook Page reviews via the current supported Graph API. The sync endpoint intentionally returns `501 META_PAGE_REVIEWS_UNAVAILABLE` instead of fabricating review data. Re-check Meta's official changelog before revisiting this limitation.
 
 ## SMS delivery safety
 
