@@ -41,6 +41,7 @@ const clientSchema = new Schema({
   demo: { type: Boolean, default: true }
 }, opts);
 clientSchema.index({ intakePhone: 1 }, { unique: true, sparse: true });
+clientSchema.index({ smsFromNumber: 1 }, { unique: true, sparse: true });
 
 const customerSchema = new Schema({
   clientId: { type: Schema.Types.ObjectId, ref: "Client", required: true, index: true },
