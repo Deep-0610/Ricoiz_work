@@ -19,6 +19,7 @@ export default function ReviewsPage() {
   const [platformCounts, setPlatformCounts] = useState({});
   const [platform, setPlatform] = useState("all");
   const [rating, setRating] = useState("all");
+  const [responseStatus, setResponseStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -31,6 +32,7 @@ export default function ReviewsPage() {
     setError("");
     const params = new URLSearchParams({ page: String(nextPage), limit: "50", platform, search });
     if (rating !== "all") params.set("rating", rating);
+    if (responseStatus !== "all") params.set("responseStatus", responseStatus);
     try {
       const response = await fetch(`${API_URL}/api/reviews?${params}`, { credentials: "include", cache: "no-store" });
       const data = await response.json().catch(() => ({}));
@@ -42,7 +44,7 @@ export default function ReviewsPage() {
       setPlatformCounts(data.platformCounts || {});
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
-  }, [platform, rating, search]);
+  }, [platform, rating, responseStatus, search]);
 
   useEffect(() => { setLoading(true); load(1); }, [load]);
 
@@ -89,6 +91,7 @@ export default function ReviewsPage() {
       <input aria-label="Search reviews" className="min-w-56 flex-1 rounded-lg border p-2.5 text-sm" placeholder="Search reviewer or review text…" value={search} onChange={e => setSearch(e.target.value)} />
       <select aria-label="Filter platform" className="rounded-lg border p-2.5 text-sm" value={platform} onChange={e => setPlatform(e.target.value)}>{platforms.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select>
       <select aria-label="Filter rating" className="rounded-lg border p-2.5 text-sm" value={rating} onChange={e => setRating(e.target.value)}><option value="all">Any rating</option>{[5,4,3,2,1].map(n => <option key={n} value={n}>{n} stars</option>)}</select>
+      <select aria-label="Filter reply status" className="rounded-lg border p-2.5 text-sm" value={responseStatus} onChange={e => setResponseStatus(e.target.value)}><option value="all">All reply statuses</option><option value="unanswered">Unanswered</option><option value="answered">Answered</option></select>
     </div>
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b p-5"><div><h2 className="font-bold">Review activity</h2><p className="text-sm text-slate-500">{items.length} of {total} matching reviews</p></div><button onClick={() => { setLoading(true); load(1); }} className="rounded-lg border px-3 py-2 text-sm font-semibold">Refresh</button></div>
