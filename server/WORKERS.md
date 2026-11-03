@@ -60,7 +60,7 @@ npm run workers
 
 ## Stripe Billing
 
-Create Starter, Growth, and Scale products and recurring monthly/yearly prices in Stripe Dashboard. Copy each Price ID into the matching `STRIPE_PRICE_* ` environment variable (without the trailing space in the variable name). Configure `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `FRONTEND_URL` on the API service. Never expose the secret or webhook signing key to the browser.
+Create Starter, Growth, and Scale products and recurring monthly/yearly prices in Stripe Dashboard. Copy each Price ID into the matching `STRIPE_PRICE_*` environment variable. Configure `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `FRONTEND_URL` on the API service. Never expose the secret or webhook signing key to the browser.
 
 Authenticated billing routes:
 - `GET /api/billing/plans` returns configured plans (it does not expose Price IDs).
