@@ -14,6 +14,21 @@ const userSchema = new Schema({
 
 const clientSchema = new Schema({
   businessName: { type: String, required: true, trim: true },
+  slug: { type: String, lowercase: true, trim: true, unique: true, sparse: true, index: true },
+  industry: { type: String, trim: true, maxlength: 100 },
+  address: {
+    line1: { type: String, trim: true },
+    line2: { type: String, trim: true },
+    city: { type: String, trim: true },
+    region: { type: String, trim: true },
+    postalCode: { type: String, trim: true },
+    country: { type: String, trim: true, default: "IN" }
+  },
+  publicReviewLinks: {
+    google: { type: String, trim: true },
+    yelp: { type: String, trim: true },
+    facebook: { type: String, trim: true }
+  },
   ownerName: String,
   ownerEmail: { type: String, lowercase: true, trim: true },
   ownerPhone: String,

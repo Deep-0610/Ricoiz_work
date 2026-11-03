@@ -17,12 +17,54 @@ export default function SettingsPage() {
   const [locationName, setLocationName] = useState("");
   const [locationTitle, setLocationTitle] = useState("");
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [businessForm, setBusinessForm] = useState({ businessName: "", industry: "", city: "", google: "", yelp: "", facebook: "", slug: "" });
+  const [businessSaving, setBusinessSaving] = useState(false);
+  const [businessNotice, setBusinessNotice] = useState("");
 
   useEffect(() => {
     fetch(`${API_URL}/api/settings/intake-phone`, { credentials: "include" })
       .then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "Could not load settings"); setIntakePhone(d.intakePhone || ""); })
       .catch(e => setError(e.message)).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/business/me`, { credentials: "include" })
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not load business profile");
+        const item = data.data || {};
+        setBusinessForm({
+          businessName: item.businessName || "",
+          industry: item.industry || "",
+          city: item.address?.city || item.city || "",
+          google: item.publicReviewLinks?.google || item.googleReviewUrl || "",
+          yelp: item.publicReviewLinks?.yelp || "",
+          facebook: item.publicReviewLinks?.facebook || "",
+          slug: item.slug || ""
+        });
+      })
+      .catch(err => setError(err.message));
+  }, []);
+
+  async function saveBusiness(event) {
+    event.preventDefault(); setBusinessSaving(true); setError(""); setBusinessNotice("");
+    try {
+      const response = await fetch(`${API_URL}/api/business/settings`, {
+        method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          businessName: businessForm.businessName,
+          industry: businessForm.industry,
+          address: { city: businessForm.city },
+          publicReviewLinks: { google: businessForm.google, yelp: businessForm.yelp, facebook: businessForm.facebook }
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not save business profile");
+      setBusinessForm(current => ({ ...current, slug: data.data?.slug || current.slug }));
+      setBusinessNotice("Business profile and public review links saved.");
+    } catch (err) { setError(err.message); }
+    finally { setBusinessSaving(false); }
+  }
 
   async function save(event) {
     event.preventDefault(); setSaving(true); setError(""); setMessage("");
@@ -78,6 +120,20 @@ export default function SettingsPage() {
   }
 
   return <section className="mx-auto max-w-6xl space-y-6">
+    <form onSubmit={saveBusiness} className="max-w-3xl space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+      <div><h2 className="font-bold">Business profile & public review links</h2><p className="mt-1 text-sm text-slate-500">These details power your public review page. Every configured platform link is shown to every customer, regardless of their rating.</p></div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <input className="rounded-lg border p-3" aria-label="Business name" placeholder="Business name" value={businessForm.businessName} onChange={e=>setBusinessForm({...businessForm,businessName:e.target.value})} required />
+        <input className="rounded-lg border p-3" aria-label="Industry" placeholder="Industry (optional)" value={businessForm.industry} onChange={e=>setBusinessForm({...businessForm,industry:e.target.value})} />
+        <input className="rounded-lg border p-3 md:col-span-2" aria-label="City" placeholder="City" value={businessForm.city} onChange={e=>setBusinessForm({...businessForm,city:e.target.value})} />
+        <input className="rounded-lg border p-3 md:col-span-2" type="url" aria-label="Google review URL" placeholder="Google review URL" value={businessForm.google} onChange={e=>setBusinessForm({...businessForm,google:e.target.value})} />
+        <input className="rounded-lg border p-3 md:col-span-2" type="url" aria-label="Yelp review URL" placeholder="Yelp review URL" value={businessForm.yelp} onChange={e=>setBusinessForm({...businessForm,yelp:e.target.value})} />
+        <input className="rounded-lg border p-3 md:col-span-2" type="url" aria-label="Facebook review URL" placeholder="Facebook recommendations URL" value={businessForm.facebook} onChange={e=>setBusinessForm({...businessForm,facebook:e.target.value})} />
+      </div>
+      <button disabled={businessSaving} className="rounded-lg bg-brand-dark px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{businessSaving ? "Saving…" : "Save business profile"}</button>
+      {businessForm.slug && <p className="text-sm text-slate-600">Public review page: <a className="font-semibold underline" href={`/r/${businessForm.slug}`} target="_blank" rel="noreferrer">/r/{businessForm.slug}</a></p>}
+      {businessNotice && <p role="status" className="text-sm text-emerald-700">{businessNotice}</p>}
+    </form>
     <div><p className="text-sm font-semibold uppercase tracking-widest text-brand">Workspace configuration</p><h1 className="mt-2 text-3xl font-bold text-slate-900">Platforms & settings</h1><p className="mt-2 text-slate-600">Connect the services that power your review inbox and customer workflows.</p></div>
     <form onSubmit={save} className="max-w-2xl space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
       <div><h2 className="font-bold">Owner intake phone</h2><p className="mt-1 text-sm text-slate-500">Close CRM inbound number used by the n8n intake workflow, in E.164 format.</p></div>
